@@ -14,7 +14,8 @@ import Notifications from './pages/Notification'
 import PrivateRoute from './components/PrivateRoute'
 
 // Use environment variable for API base URL to support Project IDX
-export const API_BASE = (import.meta.env?.VITE_API_URL as string) || 'http://localhost:8084'
+export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8084'
+
 
 // Then define the component
 export default function App() {
