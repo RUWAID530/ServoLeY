@@ -1,6 +1,7 @@
 import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL || 'http://localhost:8086').replace(/\/$/, '');
 
 export interface ProviderRegistrationData {
   firstName: string;
@@ -123,7 +124,7 @@ class ProviderService {
         throw new Error('No authentication token found');
       }
 
-      const response = await fetch('/api/auth/me', {
+      const response = await fetch(`${API_ORIGIN}/api/auth/me`, {
         method: 'GET',
         headers: { 
           'Authorization': `Bearer ${token}`,

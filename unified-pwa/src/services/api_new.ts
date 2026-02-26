@@ -11,7 +11,7 @@ import {
 
 
 // api_new.ts
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8086';
+const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8086').replace(/\/$/, '');
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -207,7 +207,7 @@ export const getMyProviderProfile = async () => {
     throw new Error('No authentication token found');
   }
 
-  const res = await fetch('/api/auth/me', {
+  const res = await fetch(`${API_BASE}/api/auth/me`, {
     method: 'GET',
     headers: { 
       'Authorization': `Bearer ${token}`,
