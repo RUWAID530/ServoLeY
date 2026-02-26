@@ -15,7 +15,6 @@ const { captureRawBody } = require('./middleware/requestSanitizer');
 const { sanitizeRequestInput } = require('./middleware/requestSanitizer');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 const { verifyAccessToken } = require('./utils/jwt');
-const { validateSecurityConfig } = require('./utils/securityConfig');
 const SecurityConfigValidator = require('./utils/securityConfigValidator');
 
 let compression = null;
@@ -240,7 +239,6 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 const PORT = Number(process.env.PORT || 8084);
-validateSecurityConfig(logger);
 connectDatabase()
   .then(() => {
     server.listen(PORT, () => {
