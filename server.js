@@ -235,6 +235,10 @@ io.on('connection', (socket) => {
   });
 });
 
+app.get('/', (_req, res) => {
+  res.status(200).json({ success: true, message: 'Servoley API is running' });
+});
+
 app.use(notFoundHandler);
 app.use(errorHandler);
 
