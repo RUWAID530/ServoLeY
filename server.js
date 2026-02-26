@@ -239,6 +239,13 @@ app.get('/', (_req, res) => {
   res.status(200).json({ success: true, message: 'Servoley API is running' });
 });
 
+import cors from "cors";
+
+app.use(cors({
+  origin: "https://servoley-tirunelveli.netlify.app",
+  credentials: true
+}));
+app.use(cors());
 app.use(notFoundHandler);
 app.use(errorHandler);
 
