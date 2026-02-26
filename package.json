@@ -3,7 +3,7 @@
     "prisma:generate": "npx prisma generate",
     "prisma:migrate": "npx prisma migrate dev",
     "start-server": "node server.js",
-    "start": "npm run start-server",
+    "start": "node server.js",
     "start:persistent": "pm2 start ecosystem.config.js",
     "backup:db": "powershell -ExecutionPolicy Bypass -File scripts/backup-database.ps1",
     "stop:persistent": "pm2 stop servoley-server",
@@ -15,6 +15,7 @@
     "backend": "node server.js",
     "frontend": "cd unified-pwa && npm run dev",
     "dev:admin": "cd admin-web && npm run dev",
+    
     "idx": "concurrently \"npm run start-server\" \"npm run dev:customer\""
   },
   "dependencies": {
