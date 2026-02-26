@@ -8,15 +8,10 @@ $env:NODE_ENV = "development"
 $env:BYPASS_OTP = "true"
 $env:PORT = "8080"
 
-# Create environment file
-Write-Host "Creating environment file..."
-"NODE_ENV=development" | Out-File -FilePath ".env" -Encoding utf8
-"JWT_SECRET=`"your-super-secret-jwt-key-786786`"" | Out-File -FilePath ".env" -Encoding utf8 -Append
-"JWT_EXPIRES_IN=`"7d`"" | Out-File -FilePath ".env" -Encoding utf8 -Append
-"OTP_EXPIRES_IN=`"300`"" | Out-File -FilePath ".env" -Encoding utf8 -Append
-"OTP_LENGTH=`"6`"" | Out-File -FilePath ".env" -Encoding utf8 -Append
-"BYPASS_OTP=true" | Out-File -FilePath ".env" -Encoding utf8 -Append
-"PORT=8080" | Out-File -FilePath ".env" -Encoding utf8 -Append
+# Do not overwrite .env
+if (-not (Test-Path ".env")) {
+    Write-Host "WARNING: .env file not found. Configure environment variables before starting."
+}
 
 # Check if port 8080 is available
 Write-Host "Checking if port 8080 is available..."

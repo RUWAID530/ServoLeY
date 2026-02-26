@@ -1,900 +1,410 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const { createSafeErrorResponse } = require('../utils/safeErrorResponses');
+const { randomUUID } = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
 const { prisma } = require('../config/database');
-const { authenticateToken, requireRole, requireVerification } = require('../middleware/auth');
-const { processOrderPayment, processRefund } = require('../utils/wallet');
-const { checkWalletBalance } = require('../utils/wallet');
-const { triggerOrderNotification } = require('../utils/notificationTriggers');
-const { assignVirtualNumberToOrder, releaseVirtualNumberForOrder } = require('../utils/virtualNumbers');
+const { authenticateToken, requireRole } = require('../middleware/auth');
+const { Prisma } = require('@prisma/client');
 
 const router = express.Router();
-// Spec aliases
-router.post('/create', authenticateToken, requireVerification, async (req, res, next) => {
-  // forward to main create with same validation by calling next route handler
-  req.url = '/';
-  next();
-});
+const ISSUE_UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'issues');
 
-router.post('/cancel', authenticateToken, async (req, res, next) => {
-  const { id, reason } = req.body || {};
-  if (!id || !reason) {
-    return res.status(400).json({ success: false, message: 'id and reason are required' });
-  }
-  req.params.id = id;
-  req.body = { reason };
-  req.url = `/${id}/cancel`;
-  next();
-});
+if (!fs.existsSync(ISSUE_UPLOAD_DIR)) {
+  fs.mkdirSync(ISSUE_UPLOAD_DIR, { recursive: true });
+}
 
-router.post('/accept', authenticateToken, requireRole('PROVIDER'), async (req, res, next) => {
-  const { id } = req.body || {};
-  if (!id) return res.status(400).json({ success: false, message: 'id is required' });
-  req.params.id = id;
-  req.url = `/${id}/accept`;
-  next();
-});
-
-router.post('/complete', authenticateToken, requireRole('PROVIDER'), async (req, res, next) => {
-  const { id } = req.body || {};
-  if (!id) return res.status(400).json({ success: false, message: 'id is required' });
-  req.params.id = id;
-  req.body = { status: 'COMPLETED' };
-  req.url = `/${id}/status`;
-  next();
-});
-
-// Create order
-router.post('/', [
-  authenticateToken,
-  requireVerification,
-  body('serviceId').notEmpty().withMessage('Service ID is required'),
-  body('serviceDate').isISO8601().withMessage('Service date must be a valid date'),
-  body('address').notEmpty().withMessage('Address is required'),
-  body('notes').optional().isString().withMessage('Notes must be a string')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array()
-      });
+const issuePhotoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, ISSUE_UPLOAD_DIR),
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname || '').toLowerCase();
+      cb(null, `issue-${Date.now()}-${randomUUID()}${ext}`);
     }
-
-    const { serviceId, serviceDate, address, notes } = req.body;
-
-    // Get service details
-    const service = await prisma.service.findUnique({
-      where: { id: serviceId },
-      include: {
-        provider: {
-          include: {
-            user: true
-          }
-        }
-      }
-    });
-
-    if (!service) {
-      return res.status(404).json({
-        success: false,
-        message: 'Service not found'
-      });
+  }),
+  limits: {
+    fileSize: 8 * 1024 * 1024 // 8MB per image
+  },
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype || !file.mimetype.startsWith('image/')) {
+      return cb(new Error('Only image files are allowed'));
     }
-
-    if (!service.isActive) {
-      return res.status(400).json({
-        success: false,
-        message: 'Service is not available'
-      });
-    }
-
-    if (!service.provider.isActive || !service.provider.isVerified) {
-      return res.status(400).json({
-        success: false,
-        message: 'Service provider is not available'
-      });
-    }
-
-    // Check if service date is in the future
-    const serviceDateTime = new Date(serviceDate);
-    if (serviceDateTime <= new Date()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Service date must be in the future'
-      });
-    }
-
-    // Check wallet balance
-    const balanceCheck = await checkWalletBalance(req.user.id, service.price);
-    if (!balanceCheck.hasSufficientBalance) {
-      return res.status(400).json({
-        success: false,
-        message: 'Insufficient wallet balance',
-        shortfall: balanceCheck.shortfall
-      });
-    }
-
-    // Create order
-    const order = await prisma.order.create({
-      data: {
-        customerId: req.user.id,
-        providerId: service.provider.userId,
-        serviceId: service.id,
-        totalAmount: service.price,
-        serviceDate: serviceDateTime,
-        address,
-        notes
-      }
-    });
-
-    // Process payment
-    const paymentResult = await processOrderPayment(
-      req.user.id,
-      service.provider.userId,
-      service.price,
-      order.id
-    );
-
-    if (!paymentResult.success) {
-      // Delete order if payment failed
-      await prisma.order.delete({
-        where: { id: order.id }
-      });
-
-      return res.status(400).json({
-        success: false,
-        message: paymentResult.message
-      });
-    }
-
-    // Update order with commission details
-    await prisma.order.update({
-      where: { id: order.id },
-      data: {
-        status: 'ACCEPTED',
-        commission: paymentResult.commission
-      }
-    });
-
-    // Trigger order notification
-    await triggerOrderNotification(order.id, 'ORDER_CREATED');
-
-    res.status(201).json({
-      success: true,
-      message: 'Order created and payment processed successfully',
-      data: {
-        order: {
-          id: order.id,
-          status: 'ACCEPTED',
-          totalAmount: order.totalAmount,
-          commission: paymentResult.commission,
-          providerAmount: paymentResult.providerAmount,
-          serviceDate: order.serviceDate,
-          address: order.address
-        }
-      }
-    });
-
-  } catch (error) {
-    console.error('Create order error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to create order'
-    });
+    return cb(null, true);
   }
 });
 
-// Get order by ID
-router.get('/:id', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
+const ensureOrderAccess = (order, user) => {
+  if (!order || !user) return false;
+  if (user.userType === 'ADMIN') return true;
+  return order.customerId === user.id || order.providerId === user.id;
+};
 
-    const order = await prisma.order.findUnique({
-      where: { id },
-      include: {
-        customer: {
-          include: {
-            profile: true
-          }
-        },
-        provider: {
-          include: {
-            user: {
-              include: {
-                profile: true
-              }
-            }
-          }
-        },
-        service: true,
-        review: true
-      }
-    });
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Order not found'
-      });
-    }
-
-    // Check if user is authorized to view this order
-    const isAuthorized = 
-      order.customerId === req.user.id || 
-      order.providerId === req.user.id || 
-      req.user.userType === 'ADMIN';
-
-    if (!isAuthorized) {
-      return res.status(403).json({
-        success: false,
-        message: 'Unauthorized to view this order'
-      });
-    }
-
-    res.json({
-      success: true,
-      data: { order }
-    });
-
-  } catch (error) {
-    console.error('Get order error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get order'
-    });
-  }
-});
-
-// Get user orders
-router.get('/', authenticateToken, async (req, res) => {
-  try {
-    const { 
-      page = 1, 
-      limit = 10, 
-      status, 
-      type = 'all' // all, customer, provider
-    } = req.query;
-    
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    let whereClause = {};
-
-    if (type === 'customer') {
-      whereClause.customerId = req.user.id;
-    } else if (type === 'provider') {
-      whereClause.providerId = req.user.id;
-    } else {
-      whereClause.OR = [
-        { customerId: req.user.id },
-        { providerId: req.user.id }
-      ];
-    }
-
-    if (status) {
-      whereClause.status = status;
-    }
-
-    const orders = await prisma.order.findMany({
-      where: whereClause,
-      include: {
-        customer: {
-          include: {
-            profile: true
-          }
-        },
-        provider: {
-          include: {
-            user: {
-              include: {
-                profile: true
-              }
-            }
-          }
-        },
-        service: true,
-        review: true
-      },
-      orderBy: { createdAt: 'desc' },
-      skip,
-      take: parseInt(limit)
-    });
-
-    const total = await prisma.order.count({
-      where: whereClause
-    });
-
-    res.json({
-      success: true,
-      data: {
-        orders,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total,
-          pages: Math.ceil(total / parseInt(limit))
-        }
-      }
-    });
-
-  } catch (error) {
-    console.error('Get orders error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get orders'
-    });
-  }
-});
-
-// Provider: Accept order
-router.post('/:id/accept', authenticateToken, requireRole('PROVIDER'), async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const order = await prisma.order.findFirst({
-      where: {
-        id,
-        providerId: req.user.id,
-        status: 'PENDING'
-      }
-    });
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Order not found or already processed'
-      });
-    }
-
-    const updatedOrder = await prisma.order.update({
-      where: { id },
-      data: { status: 'ACCEPTED' }
-    });
-
-  // Assign virtual number on accept
-  try {
-    await assignVirtualNumberToOrder(id);
-  } catch (e) {
-    console.error('Virtual number assign failed:', e.message);
-  }
-
-    // Trigger order notification
-    await triggerOrderNotification(id, 'ORDER_ACCEPTED');
-
-    res.json({
-      success: true,
-      message: 'Order accepted successfully',
-      data: { order: updatedOrder }
-    });
-
-  } catch (error) {
-    console.error('Accept order error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to accept order'
-    });
-  }
-});
-
-// Provider: Reject order
-router.post('/:id/reject', [
-  authenticateToken,
-  requireRole('PROVIDER'),
-  body('reason').notEmpty().withMessage('Rejection reason is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array()
-      });
-    }
-
-    const { id } = req.params;
-    const { reason } = req.body;
-
-    const order = await prisma.order.findFirst({
-      where: {
-        id,
-        providerId: req.user.id,
-        status: 'PENDING'
-      }
-    });
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Order not found or already processed'
-      });
-    }
-
-    // Process refund
-    const refundResult = await processRefund(
-      order.customerId,
-      order.totalAmount,
-      order.id,
-      `Order rejected: ${reason}`
-    );
-
-    if (!refundResult.success) {
-      return res.status(400).json({
-        success: false,
-        message: refundResult.message
-      });
-    }
-
-    // Update order status
-    const updatedOrder = await prisma.order.update({
-      where: { id },
-      data: {
-        status: 'REJECTED',
-        cancelledBy: req.user.id,
-        cancelReason: reason,
-        cancelledAt: new Date()
-      }
-    });
-
-    // Increment provider cancellation count and flag suspect if needed
-    await prisma.user.update({
-      where: { id: req.user.id },
-      data: {
-        cancellationsCount: { increment: 1 },
-        isSuspect: undefined
-      }
-    });
-    const updatedProvider = await prisma.user.findUnique({ where: { id: req.user.id } });
-    if (updatedProvider && updatedProvider.cancellationsCount > 3 && !updatedProvider.isSuspect) {
-      await prisma.user.update({ where: { id: req.user.id }, data: { isSuspect: true } });
-    }
-
-    res.json({
-      success: true,
-      message: 'Order rejected and refund processed',
-      data: { order: updatedOrder }
-    });
-
-  } catch (error) {
-    console.error('Reject order error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to reject order'
-    });
-  }
-});
-
-// Provider: Update order status
-router.put('/:id/status', [
-  authenticateToken,
-  requireRole('PROVIDER'),
-  body('status').isIn(['IN_PROGRESS', 'COMPLETED']).withMessage('Invalid status')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array()
-      });
-    }
-
-    const { id } = req.params;
-    const { status } = req.body;
-
-    const order = await prisma.order.findFirst({
-      where: {
-        id,
-        providerId: req.user.id,
-        status: {
-          in: ['ACCEPTED', 'IN_PROGRESS']
-        }
-      }
-    });
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Order not found or invalid status transition'
-      });
-    }
-
-    const updateData = { status };
-    if (status === 'COMPLETED') {
-      updateData.completedAt = new Date();
-    }
-
-    // Trigger order notification
-    await triggerOrderNotification(id, status === 'IN_PROGRESS' ? 'ORDER_IN_PROGRESS' : 'ORDER_COMPLETED');
-
-    const updatedOrder = await prisma.order.update({
-      where: { id },
-      data: updateData
-    });
-
-  // Release virtual number on completion
-  if (status === 'COMPLETED') {
+// Create booking (Customer)
+router.post(
+  '/',
+  [
+    authenticateToken,
+    requireRole('CUSTOMER'),
+    issuePhotoUpload.array('issuePhotos', 6)
+  ],
+  async (req, res) => {
     try {
-      await releaseVirtualNumberForOrder(id);
-    } catch (e) {
-      console.error('Virtual number release failed:', e.message);
-    }
-  }
-
-    res.json({
-      success: true,
-      message: `Order status updated to ${status}`,
-      data: { order: updatedOrder }
-    });
-
-  } catch (error) {
-    console.error('Update order status error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update order status'
-    });
-  }
-});
-
-// Customer: Cancel order
-router.post('/:id/cancel', [
-  authenticateToken,
-  body('reason').notEmpty().withMessage('Cancellation reason is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array()
-      });
-    }
-
-    const { id } = req.params;
-    const { reason } = req.body;
-
-    const order = await prisma.order.findFirst({
-      where: {
-        id,
-        customerId: req.user.id,
-        status: {
-          in: ['PENDING', 'ACCEPTED']
-        }
-      }
-    });
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Order not found or cannot be cancelled'
-      });
-    }
-
-    // Process refund
-    const refundResult = await processRefund(
-      order.customerId,
-      order.totalAmount,
-      order.id,
-      `Order cancelled: ${reason}`
-    );
-
-    if (!refundResult.success) {
-      return res.status(400).json({
-        success: false,
-        message: refundResult.message
-      });
-    }
-
-    // Update order status
-    const updatedOrder = await prisma.order.update({
-      where: { id },
-      data: {
-        status: 'CANCELLED',
-        cancelledBy: req.user.id,
-        cancelReason: reason,
-        cancelledAt: new Date()
-      }
-    });
-
-    // Increment cancellation count and flag suspect if needed
-    await prisma.user.update({
-      where: { id: req.user.id },
-      data: {
-        cancellationsCount: { increment: 1 },
-        isSuspect: undefined
-      }
-    });
-    // Fetch updated user to compute suspect flag
-    const updatedUser = await prisma.user.findUnique({ where: { id: req.user.id } });
-    if (updatedUser && updatedUser.cancellationsCount > 3 && !updatedUser.isSuspect) {
-      await prisma.user.update({ where: { id: req.user.id }, data: { isSuspect: true } });
-    }
-
-    res.json({
-      success: true,
-      message: 'Order cancelled and refund processed',
-      data: { order: updatedOrder }
-    });
-
-  } catch (error) {
-    console.error('Cancel order error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to cancel order'
-    });
-  }
-});
-
-// Get order timeline
-router.get('/:id/timeline', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const order = await prisma.order.findUnique({
-      where: { id },
-      include: {
-        customer: {
-          include: {
-            profile: true
-          }
-        },
-        provider: {
-          include: {
-            user: {
-              include: {
-                profile: true
-              }
-            }
-          }
-        },
-        service: true
-      }
-    });
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Order not found'
-      });
-    }
-
-    // Check if user is authorized to view this order
-    const isAuthorized = 
-      order.customerId === req.user.id || 
-      order.providerId === req.user.id || 
-      req.user.userType === 'ADMIN';
-
-    if (!isAuthorized) {
-      return res.status(403).json({
-        success: false,
-        message: 'Unauthorized to view this order'
-      });
-    }
-
-    // Create timeline
-    const timeline = [
-      {
-        status: 'PENDING',
-        title: 'Order Placed',
-        description: 'Order has been placed and is waiting for provider acceptance',
-        timestamp: order.createdAt,
-        completed: true
-      }
-    ];
-
-    if (order.status !== 'PENDING') {
-      timeline.push({
-        status: 'ACCEPTED',
-        title: 'Order Accepted',
-        description: 'Provider has accepted the order',
-        timestamp: order.updatedAt,
-        completed: true
-      });
-    }
-
-    if (order.status === 'IN_PROGRESS' || order.status === 'COMPLETED') {
-      timeline.push({
-        status: 'IN_PROGRESS',
-        title: 'Service In Progress',
-        description: 'Provider has started the service',
-        timestamp: order.updatedAt,
-        completed: order.status === 'COMPLETED'
-      });
-    }
-
-    if (order.status === 'COMPLETED') {
-      timeline.push({
-        status: 'COMPLETED',
-        title: 'Service Completed',
-        description: 'Service has been completed successfully',
-        timestamp: order.completedAt,
-        completed: true
-      });
-    }
-
-    if (order.status === 'CANCELLED' || order.status === 'REJECTED') {
-      timeline.push({
-        status: order.status,
-        title: order.status === 'CANCELLED' ? 'Order Cancelled' : 'Order Rejected',
-        description: order.cancelReason || 'Order was cancelled/rejected',
-        timestamp: order.cancelledAt,
-        completed: true
-      });
-    }
-
-    res.json({
-      success: true,
-      data: {
-        order,
-        timeline
-      }
-    });
-
-  } catch (error) {
-    console.error('Get order timeline error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get order timeline'
-    });
-  }
-});
-
-// Admin: Get all orders
-router.get('/admin/all', authenticateToken, requireRole('ADMIN'), async (req, res) => {
-  try {
-    const { 
-      page = 1, 
-      limit = 10, 
-      status, 
-      customerId, 
-      providerId,
-      startDate,
-      endDate
-    } = req.query;
-    
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    const whereClause = {};
-    if (status) whereClause.status = status;
-    if (customerId) whereClause.customerId = customerId;
-    if (providerId) whereClause.providerId = providerId;
-    if (startDate && endDate) {
-      whereClause.createdAt = {
-        gte: new Date(startDate),
-        lte: new Date(endDate)
-      };
-    }
-
-    const orders = await prisma.order.findMany({
-      where: whereClause,
-      include: {
-        customer: {
-          include: {
-            profile: true
-          }
-        },
-        provider: {
-          include: {
-            user: {
-              include: {
-                profile: true
-              }
-            }
-          }
-        },
-        service: true,
-        review: true
-      },
-      orderBy: { createdAt: 'desc' },
-      skip,
-      take: parseInt(limit)
-    });
-
-    const total = await prisma.order.count({
-      where: whereClause
-    });
-
-    res.json({
-      success: true,
-      data: {
-        orders,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total,
-          pages: Math.ceil(total / parseInt(limit))
-        }
-      }
-    });
-
-  } catch (error) {
-    console.error('Get admin orders error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get orders'
-    });
-  }
-});
-
-// Admin: Cancel order
-router.post('/:id/admin/cancel', [
-  authenticateToken,
-  requireRole('ADMIN'),
-  body('reason').notEmpty().withMessage('Cancellation reason is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array()
-      });
-    }
-
-    const { id } = req.params;
-    const { reason } = req.body;
-
-    const order = await prisma.order.findUnique({
-      where: { id }
-    });
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Order not found'
-      });
-    }
-
-    if (order.status === 'COMPLETED') {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot cancel completed order'
-      });
-    }
-
-    // Process refund if order was paid
-    if (order.status !== 'PENDING') {
-      const refundResult = await processRefund(
-        order.customerId,
-        order.totalAmount,
-        order.id,
-        `Admin cancellation: ${reason}`
+      const pickSingle = (value) => (Array.isArray(value) ? value[0] : value);
+      const rawServiceId = pickSingle(
+        req.body.serviceId ??
+        req.body.serviceID ??
+        req.body.service_id ??
+        req.body.service
+      );
+      const rawServiceDate = pickSingle(
+        req.body.serviceDate ??
+        req.body.date ??
+        req.body.scheduledAt
+      );
+      const rawAddress = pickSingle(
+        req.body.address ??
+        req.body.location ??
+        req.body.serviceAddress
+      );
+      const rawNotes = pickSingle(
+        req.body.notes ??
+        req.body.problem ??
+        req.body.description ??
+        ''
       );
 
-      if (!refundResult.success) {
-        return res.status(400).json({
-          success: false,
-          message: refundResult.message
+      const serviceId = String(rawServiceId || '').trim();
+      const serviceDateInput = String(rawServiceDate || '').trim();
+      const address = String(rawAddress || '').trim();
+      const notes = String(rawNotes || '');
+
+      const errors = [];
+      if (!serviceId) {
+        errors.push({
+          type: 'field',
+          msg: 'Service ID is required',
+          path: 'serviceId',
+          location: 'body'
         });
       }
+      if (!serviceDateInput) {
+        errors.push({
+          type: 'field',
+          msg: 'Service date is required',
+          path: 'serviceDate',
+          location: 'body'
+        });
+      }
+      if (!address) {
+        errors.push({
+          type: 'field',
+          msg: 'Address is required',
+          path: 'address',
+          location: 'body'
+        });
+      }
+
+      if (errors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors
+        });
+      }
+
+      const uploadedIssuePhotos = Array.isArray(req.files)
+        ? req.files.map((file) => `/uploads/issues/${file.filename}`)
+        : [];
+
+      const scheduledAt = new Date(serviceDateInput);
+      if (Number.isNaN(scheduledAt.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid service date/time'
+        });
+      }
+
+      const service = await prisma.services.findUnique({
+        where: { id: serviceId },
+        include: {
+          providers: true
+        }
+      });
+
+      if (!service) {
+        return res.status(404).json({
+          success: false,
+          message: 'Service not found'
+        });
+      }
+
+      const status = String(service.status || '').toUpperCase();
+      if (!service.isActive || (status && status !== 'ACTIVE')) {
+        return res.status(400).json({
+          success: false,
+          message: 'Service is not available for booking'
+        });
+      }
+
+      const providerUserId = service.providers?.userId;
+      if (!providerUserId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Provider not available for this service'
+        });
+      }
+
+      const cleanNotes = typeof notes === 'string' && notes.trim() ? notes.trim() : '';
+      const notesWithIssuePhotos = uploadedIssuePhotos.length
+        ? `${cleanNotes}${cleanNotes ? '\n\n' : ''}Issue photos:\n${uploadedIssuePhotos.map((url) => `- ${url}`).join('\n')}`
+        : cleanNotes;
+
+      const order = await prisma.$transaction(
+        async (tx) => {
+          const existingBooking = await tx.orders.findFirst({
+            where: {
+              providerId: providerUserId,
+              serviceDate: scheduledAt,
+              status: {
+                in: ['PENDING', 'ACCEPTED', 'IN_PROGRESS']
+              }
+            },
+            select: { id: true }
+          });
+
+          if (existingBooking) {
+            const conflictError = new Error('Selected timeslot is already booked. Please choose another slot.');
+            conflictError.statusCode = 409;
+            conflictError.isOperational = true;
+            throw conflictError;
+          }
+
+          return tx.orders.create({
+            data: {
+              id: randomUUID(),
+              customerId: req.user.id,
+              providerId: providerUserId,
+              serviceId: service.id,
+              status: 'PENDING',
+              totalAmount: Number(service.price) || 0,
+              serviceDate: scheduledAt,
+              address,
+              notes: notesWithIssuePhotos || null,
+              updatedAt: new Date()
+            }
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      );
+
+      return res.status(201).json({
+        success: true,
+        message: 'Booking created successfully',
+        data: {
+          order,
+          issuePhotos: uploadedIssuePhotos
+        }
+      });
+    } catch (error) {
+      if (error?.statusCode === 409) {
+        return res.status(409).json({
+          success: false,
+          message: error.message
+        });
+      }
+
+      console.error('Create booking error:', error);
+      const isPrismaKnown = error instanceof Prisma.PrismaClientKnownRequestError;
+      const isPrismaValidation = error instanceof Prisma.PrismaClientValidationError;
+
+      if (isPrismaKnown) {
+        return createSafeErrorResponse(res, error, 'Failed to create booking');
+      }
+
+      if (isPrismaValidation) {
+        return createSafeErrorResponse(res, error, 'Failed to create booking');
+      }
+
+      return createSafeErrorResponse(res, error, 'Failed to create booking');
+    }
+  }
+);
+
+// List orders for current user
+router.get('/', authenticateToken, async (req, res) => {
+  try {
+    const where = {};
+    if (req.user.userType === 'CUSTOMER') {
+      where.customerId = req.user.id;
+    } else if (req.user.userType === 'PROVIDER') {
+      where.providerId = req.user.id;
     }
 
-    // Update order status
-    const updatedOrder = await prisma.order.update({
-      where: { id },
+    const orders = await prisma.orders.findMany({
+      where,
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return res.json({
+      success: true,
       data: {
-        status: 'CANCELLED',
-        cancelledBy: req.user.id,
-        cancelReason: reason,
-        cancelledAt: new Date()
+        orders
       }
     });
+  } catch (error) {
+    console.error('Get orders error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch orders'
+    });
+  }
+});
 
-    res.json({
-      success: true,
-      message: 'Order cancelled by admin',
-      data: { order: updatedOrder }
+// Get order chat messages
+router.get('/:orderId/messages', authenticateToken, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const order = await prisma.orders.findUnique({ where: { id: orderId } });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    if (!ensureOrderAccess(order, req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized'
+      });
+    }
+
+    const messages = await prisma.messages.findMany({
+      where: { orderId },
+      orderBy: { createdAt: 'asc' }
     });
 
+    const data = messages.map((message) => ({
+      id: message.id,
+      content: message.content,
+      createdAt: message.createdAt,
+      isFromCustomer: message.senderId === order.customerId
+    }));
+
+    return res.json({
+      success: true,
+      data
+    });
   } catch (error) {
-    console.error('Admin cancel order error:', error);
-    res.status(500).json({
+    console.error('Get order messages error:', error);
+    return res.status(500).json({
       success: false,
-      message: 'Failed to cancel order'
+      message: 'Failed to fetch messages'
+    });
+  }
+});
+
+// Send order chat message
+router.post(
+  '/:orderId/messages',
+  [
+    authenticateToken,
+    body('content').notEmpty().withMessage('Message content is required')
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: errors.array()
+        });
+      }
+
+      const { orderId } = req.params;
+      const { content } = req.body;
+      const order = await prisma.orders.findUnique({ where: { id: orderId } });
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message: 'Order not found'
+        });
+      }
+
+      if (!ensureOrderAccess(order, req.user)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Unauthorized'
+        });
+      }
+
+      const receiverId = req.user.id === order.customerId ? order.providerId : order.customerId;
+
+      const message = await prisma.messages.create({
+        data: {
+          id: randomUUID(),
+          senderId: req.user.id,
+          receiverId,
+          orderId,
+          content: String(content).trim()
+        }
+      });
+
+      return res.status(201).json({
+        success: true,
+        data: {
+          id: message.id,
+          content: message.content,
+          createdAt: message.createdAt,
+          isFromCustomer: message.senderId === order.customerId
+        }
+      });
+    } catch (error) {
+      console.error('Send order message error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send message'
+      });
+    }
+  }
+);
+
+// Get order by ID
+router.get('/:orderId', authenticateToken, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const order = await prisma.orders.findUnique({
+      where: { id: orderId }
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    if (!ensureOrderAccess(order, req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized'
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: order
+    });
+  } catch (error) {
+    console.error('Get order details error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch order details'
     });
   }
 });

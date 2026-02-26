@@ -4,12 +4,12 @@ const { processRefund } = require('./wallet');
 // Auto-reassign order to another provider
 const autoReassignOrder = async (orderId, reason = 'Provider rejected') => {
   try {
-    const order = await prisma.order.findUnique({
+    const order = await prisma.orders.findUnique({
       where: { id: orderId },
       include: {
-        service: {
+        services: {
           include: {
-            provider: true
+            providers: true
           }
         }
       }
@@ -20,14 +20,21 @@ const autoReassignOrder = async (orderId, reason = 'Provider rejected') => {
     }
 
     // Find alternative providers in the same area and category
-    const alternativeProviders = await prisma.provider.findMany({
+    const currentService = order.services;
+    const currentProvider = currentService?.providers;
+
+    if (!currentService || !currentProvider) {
+      throw new Error('Order service/provider details not found');
+    }
+
+    const alternativeProviders = await prisma.providers.findMany({
       where: {
-        area: order.service.provider.area,
-        category: order.service.provider.category,
+        area: currentProvider.area,
+        category: currentProvider.category,
         isActive: true,
         isVerified: true,
         id: {
-          not: order.service.providerId
+          not: currentService.providerId
         }
       },
       include: {
@@ -52,7 +59,7 @@ const autoReassignOrder = async (orderId, reason = 'Provider rejected') => {
         'No alternative providers available'
       );
 
-      await prisma.order.update({
+      await prisma.orders.update({
         where: { id: orderId },
         data: {
           status: 'CANCELLED',
@@ -71,7 +78,7 @@ const autoReassignOrder = async (orderId, reason = 'Provider rejected') => {
     // Reassign to the best alternative provider
     const newProvider = alternativeProviders[0];
     
-    await prisma.order.update({
+    await prisma.orders.update({
       where: { id: orderId },
       data: {
         providerId: newProvider.userId,
@@ -96,7 +103,7 @@ const autoReassignOrder = async (orderId, reason = 'Provider rejected') => {
 // Check for orders that need auto-reassignment
 const checkPendingOrders = async () => {
   try {
-    const pendingOrders = await prisma.order.findMany({
+    const pendingOrders = await prisma.orders.findMany({
       where: {
         status: 'PENDING',
         createdAt: {
@@ -104,9 +111,9 @@ const checkPendingOrders = async () => {
         }
       },
       include: {
-        service: {
+        services: {
           include: {
-            provider: true
+            providers: true
           }
         }
       }
@@ -114,7 +121,11 @@ const checkPendingOrders = async () => {
 
     for (const order of pendingOrders) {
       console.log(`Auto-reassigning order ${order.id} - pending for too long`);
-      await autoReassignOrder(order.id, 'Provider did not respond within 30 minutes');
+      try {
+        await autoReassignOrder(order.id, 'Provider did not respond within 30 minutes');
+      } catch (reassignError) {
+        console.error(`Auto-reassign failed for order ${order.id}:`, reassignError);
+      }
     }
 
     return {
@@ -124,7 +135,10 @@ const checkPendingOrders = async () => {
 
   } catch (error) {
     console.error('Check pending orders error:', error);
-    throw new Error('Failed to check pending orders');
+    return {
+      success: false,
+      processedOrders: 0
+    };
   }
 };
 
@@ -139,7 +153,7 @@ const getOrderStatistics = async (startDate = null, endDate = null) => {
       };
     }
 
-    const orders = await prisma.order.findMany({
+    const orders = await prisma.orders.findMany({
       where: whereClause,
       select: {
         status: true,
@@ -196,7 +210,7 @@ const getProviderOrderStatistics = async (providerId, startDate = null, endDate 
       };
     }
 
-    const orders = await prisma.order.findMany({
+    const orders = await prisma.orders.findMany({
       where: whereClause,
       select: {
         status: true,
@@ -256,7 +270,7 @@ const getCustomerOrderStatistics = async (customerId, startDate = null, endDate 
       };
     }
 
-    const orders = await prisma.order.findMany({
+    const orders = await prisma.orders.findMany({
       where: whereClause,
       select: {
         status: true,
@@ -314,7 +328,7 @@ const getTopProviders = async (limit = 10, startDate = null, endDate = null) => 
       };
     }
 
-    const topProviders = await prisma.order.groupBy({
+    const topProviders = await prisma.orders.groupBy({
       by: ['providerId'],
       where: whereClause,
       _count: { providerId: true },
@@ -378,7 +392,7 @@ const getTopServices = async (limit = 10, startDate = null, endDate = null) => {
       };
     }
 
-    const topServices = await prisma.order.groupBy({
+    const topServices = await prisma.orders.groupBy({
       by: ['serviceId'],
       where: whereClause,
       _count: { serviceId: true },
@@ -435,7 +449,11 @@ const getTopServices = async (limit = 10, startDate = null, endDate = null) => {
 };
 
 // Schedule auto-reassignment check (run every 5 minutes)
-setInterval(checkPendingOrders, 5 * 60 * 1000);
+setInterval(() => {
+  checkPendingOrders().catch((error) => {
+    console.error('Scheduled pending order check failed:', error);
+  });
+}, 5 * 60 * 1000);
 
 module.exports = {
   autoReassignOrder,

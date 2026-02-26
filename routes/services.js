@@ -5,6 +5,59 @@ const { authenticateToken, requireRole, requireVerification, requireProviderVeri
 
 const router = express.Router();
 
+// Platform stats (public)
+router.get('/stats/platform', async (req, res) => {
+  try {
+    const [totalCustomers, totalProviderUsers, totalServices, totalVerifiedProviders] = await Promise.all([
+      prisma.users.count({
+        where: {
+          isActive: true,
+          userType: 'CUSTOMER'
+        }
+      }),
+      prisma.users.count({
+        where: {
+          isActive: true,
+          userType: 'PROVIDER'
+        }
+      }),
+      prisma.services.count({
+        where: {
+          isActive: true,
+          status: {
+            in: ['ACTIVE', 'active']
+          }
+        }
+      }),
+      prisma.providers.count({
+        where: {
+          isActive: true,
+          isVerified: true
+        }
+      })
+    ]);
+
+    const totalUsers = totalCustomers + totalProviderUsers;
+
+    return res.json({
+      success: true,
+      data: {
+        totalUsers,
+        totalCustomers,
+        totalProviders: totalProviderUsers,
+        totalServices,
+        totalVerifiedProviders
+      }
+    });
+  } catch (error) {
+    console.error('Get platform stats error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get platform stats'
+    });
+  }
+});
+
 // Get all services (public)
 router.get('/', async (req, res) => {
   try {
@@ -23,24 +76,28 @@ router.get('/', async (req, res) => {
     
     const whereClause = {
       isActive: true,
-      provider: {
-        isActive: true,
-        isVerified: true
+      status: {
+        in: ['ACTIVE', 'active']
       }
     };
 
+    const providerFilter = {};
+
     // Apply filters
     if (category) whereClause.category = category;
-    if (area) whereClause.provider.area = area;
+    if (area) providerFilter.area = area;
     if (minPrice || maxPrice) {
       whereClause.price = {};
       if (minPrice) whereClause.price.gte = parseFloat(minPrice);
       if (maxPrice) whereClause.price.lte = parseFloat(maxPrice);
     }
     if (rating) {
-      whereClause.provider.rating = {
+      providerFilter.rating = {
         gte: parseFloat(rating)
       };
+    }
+    if (Object.keys(providerFilter).length > 0) {
+      whereClause.providers = { is: providerFilter };
     }
     if (search) {
       whereClause.OR = [
@@ -50,14 +107,19 @@ router.get('/', async (req, res) => {
       ];
     }
 
-    const services = await prisma.service.findMany({
+    const services = await prisma.services.findMany({
       where: whereClause,
       include: {
-        provider: {
+        providers: {
           include: {
-            user: {
+            _count: {
+              select: {
+                reviews: true
+              }
+            },
+            users: {
               include: {
-                profile: true
+                profiles: true
               }
             }
           }
@@ -68,7 +130,7 @@ router.get('/', async (req, res) => {
       take: parseInt(limit)
     });
 
-    const total = await prisma.service.count({
+    const total = await prisma.services.count({
       where: whereClause
     });
 
@@ -99,14 +161,19 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const service = await prisma.service.findUnique({
+    const service = await prisma.services.findUnique({
       where: { id },
       include: {
-        provider: {
+        providers: {
           include: {
-            user: {
+            _count: {
+              select: {
+                reviews: true
+              }
+            },
+            users: {
               include: {
-                profile: true
+                profiles: true
               }
             }
           }
@@ -115,7 +182,7 @@ router.get('/:id', async (req, res) => {
           include: {
             customer: {
               include: {
-                profile: true
+                profiles: true
               }
             },
             review: true
@@ -160,8 +227,13 @@ router.get('/:id', async (req, res) => {
 // Get service categories
 router.get('/categories/list', async (req, res) => {
   try {
-    const categories = await prisma.service.findMany({
-      where: { isActive: true },
+    const categories = await prisma.services.findMany({
+      where: {
+        isActive: true,
+        status: {
+          in: ['ACTIVE', 'active']
+        }
+      },
       select: { category: true },
       distinct: ['category']
     });
@@ -185,7 +257,7 @@ router.get('/categories/list', async (req, res) => {
 // Get service areas
 router.get('/areas/list', async (req, res) => {
   try {
-    const areas = await prisma.provider.findMany({
+    const areas = await prisma.providers.findMany({
       where: { 
         isActive: true,
         isVerified: true
@@ -234,7 +306,7 @@ router.post('/', [
     const { name, description, category, price, duration } = req.body;
 
     // Get provider
-    const provider = await prisma.provider.findUnique({
+    const provider = await prisma.providers.findUnique({
       where: { userId: req.user.id }
     });
 
@@ -245,20 +317,22 @@ router.post('/', [
       });
     }
 
-    const service = await prisma.service.create({
+    const service = await prisma.services.create({
       data: {
         providerId: provider.id,
         name,
         description,
         category,
         price,
-        duration
+        duration,
+        status: 'PENDING_VERIFICATION',
+        isActive: false
       }
     });
 
     res.status(201).json({
       success: true,
-      message: 'Service created successfully',
+      message: 'Service created and sent for admin verification',
       data: { service }
     });
 
@@ -293,13 +367,13 @@ router.put('/:id', [
     }
 
     const { id } = req.params;
-    const { name, description, category, price, duration, isActive } = req.body;
+    const { name, description, category, price, duration } = req.body;
 
     // Check if service belongs to provider
-    const service = await prisma.service.findFirst({
+    const service = await prisma.services.findFirst({
       where: {
         id,
-        provider: {
+        providers: {
           userId: req.user.id
         }
       }
@@ -312,15 +386,21 @@ router.put('/:id', [
       });
     }
 
-    const updatedService = await prisma.service.update({
+    const changedCatalogFields = [name, description, category, price, duration].some((value) => value !== undefined);
+
+    const updatedService = await prisma.services.update({
       where: { id },
       data: {
-        ...(name && { name }),
-        ...(description && { description }),
-        ...(category && { category }),
-        ...(price && { price }),
-        ...(duration && { duration }),
-        ...(isActive !== undefined && { isActive })
+        ...(name !== undefined && { name }),
+        ...(description !== undefined && { description }),
+        ...(category !== undefined && { category }),
+        ...(price !== undefined && { price }),
+        ...(duration !== undefined && { duration }),
+        ...(changedCatalogFields && {
+          status: 'PENDING_VERIFICATION',
+          isActive: false
+        }),
+        updatedAt: new Date()
       }
     });
 
@@ -345,10 +425,10 @@ router.delete('/:id', authenticateToken, requireRole('PROVIDER'), async (req, re
     const { id } = req.params;
 
     // Check if service belongs to provider
-    const service = await prisma.service.findFirst({
+    const service = await prisma.services.findFirst({
       where: {
         id,
-        provider: {
+        providers: {
           userId: req.user.id
         }
       }
@@ -378,7 +458,7 @@ router.delete('/:id', authenticateToken, requireRole('PROVIDER'), async (req, re
       });
     }
 
-    await prisma.service.delete({
+    await prisma.services.delete({
       where: { id }
     });
 
@@ -403,7 +483,7 @@ router.get('/provider/my-services', authenticateToken, requireRole('PROVIDER'), 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     const whereClause = {
-      provider: {
+      providers: {
         userId: req.user.id
       }
     };
@@ -412,7 +492,7 @@ router.get('/provider/my-services', authenticateToken, requireRole('PROVIDER'), 
       whereClause.isActive = isActive === 'true';
     }
 
-    const services = await prisma.service.findMany({
+    const services = await prisma.services.findMany({
       where: whereClause,
       include: {
         orders: {
@@ -431,7 +511,7 @@ router.get('/provider/my-services', authenticateToken, requireRole('PROVIDER'), 
       take: parseInt(limit)
     });
 
-    const total = await prisma.service.count({
+    const total = await prisma.services.count({
       where: whereClause
     });
 
@@ -462,10 +542,10 @@ router.get('/:id/stats', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const service = await prisma.service.findUnique({
+    const service = await prisma.services.findUnique({
       where: { id },
       include: {
-        provider: {
+        providers: {
           include: {
             user: true
           }
@@ -481,7 +561,7 @@ router.get('/:id/stats', authenticateToken, async (req, res) => {
     }
 
     // Check if user is the provider
-    const isProvider = service.provider.userId === req.user.id;
+    const isProvider = service.providers?.userId === req.user.id;
 
     if (!isProvider && req.user.userType !== 'ADMIN') {
       return res.status(403).json({
@@ -549,6 +629,48 @@ router.get('/:id/stats', authenticateToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to get service statistics'
+    });
+  }
+});
+
+// Provider: Publish service (make available to customers)
+router.put('/:id/publish', [
+  authenticateToken,
+  requireRole('ADMIN')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const service = await prisma.services.findUnique({ where: { id } });
+
+    if (!service) {
+      return res.status(404).json({
+        success: false,
+        message: 'Service not found'
+      });
+    }
+
+    // Update service status to active (published)
+    const updatedService = await prisma.services.update({
+      where: { id: id },
+      data: {
+        status: 'ACTIVE',
+        isActive: true,
+        updatedAt: new Date()
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Service published successfully',
+      data: { service: updatedService }
+    });
+
+  } catch (error) {
+    console.error('Publish service error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to publish service'
     });
   }
 });

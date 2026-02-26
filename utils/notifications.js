@@ -1,6 +1,7 @@
 const { prisma } = require('../config/database');
 const { sendSMSNotification } = require('./sms');
 const { sendNotificationEmail } = require('./email');
+const { randomUUID } = require('crypto');
 
 // Send push notification (placeholder FCM integration)
 const sendPushNotification = async (userId, title, body, data = {}) => {
@@ -290,14 +291,15 @@ const deleteNotification = async (notificationId, userId) => {
 // Get notification preferences
 const getNotificationPreferences = async (userId) => {
   try {
-    let preferences = await prisma.notificationPreferences.findUnique({
+    let preferences = await prisma.notification_preferences.findUnique({
       where: { userId }
     });
 
     if (!preferences) {
       // Create default preferences
-      preferences = await prisma.notificationPreferences.create({
+      preferences = await prisma.notification_preferences.create({
         data: {
+          id: randomUUID(),
           userId,
           pushEnabled: true,
           emailEnabled: true,
@@ -305,7 +307,8 @@ const getNotificationPreferences = async (userId) => {
           orderUpdates: true,
           messages: true,
           promotions: false,
-          systemAlerts: true
+          systemAlerts: true,
+          updatedAt: new Date()
         }
       });
     }
@@ -321,12 +324,34 @@ const getNotificationPreferences = async (userId) => {
 // Update notification preferences
 const updateNotificationPreferences = async (userId, preferences) => {
   try {
-    const updatedPreferences = await prisma.notificationPreferences.upsert({
+    const allowedFields = [
+      'pushEnabled',
+      'emailEnabled',
+      'smsEnabled',
+      'orderUpdates',
+      'messages',
+      'promotions',
+      'systemAlerts'
+    ];
+
+    const updatePayload = {};
+    for (const field of allowedFields) {
+      if (typeof preferences[field] === 'boolean') {
+        updatePayload[field] = preferences[field];
+      }
+    }
+
+    const updatedPreferences = await prisma.notification_preferences.upsert({
       where: { userId },
-      update: preferences,
+      update: {
+        ...updatePayload,
+        updatedAt: new Date()
+      },
       create: {
+        id: randomUUID(),
         userId,
-        ...preferences
+        ...updatePayload,
+        updatedAt: new Date()
       }
     });
 

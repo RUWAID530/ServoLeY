@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+img,
+video,
+canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+input,
+select,
+textarea,
+button {
+  max-width: 100%;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes fadeSlide {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-slide {
+  animation: fadeSlide 0.35s ease-out;
+}
+
+/* Provider light-theme overrides (scoped) */
+html.light .provider-shell {
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
+
+html.light .provider-shell .provider-content {
+  background-color: #f8fafc;
+}
+
+html.light .provider-shell [class*="bg-slate-900"],
+html.light .provider-shell [class*="bg-slate-800"],
+html.light .provider-shell [class*="bg-[#152233]"],
+html.light .provider-shell [class*="bg-[#152B3C]"],
+html.light .provider-shell [class*="bg-[#0B141E]"],
+html.light .provider-shell [class*="bg-white/10"],
+html.light .provider-shell [class*="bg-white/5"],
+html.light .provider-shell [class*="from-slate-900"],
+html.light .provider-shell [class*="via-slate-800"],
+html.light .provider-shell [class*="to-slate-900"],
+html.light .provider-shell [class*="from-white/10"],
+html.light .provider-shell [class*="to-white/5"] {
+  background-color: #ffffff !important;
+  background-image: none !important;
+}
+
+html.light .provider-shell [class*="border-slate-900"],
+html.light .provider-shell [class*="border-slate-800"],
+html.light .provider-shell [class*="border-slate-700"],
+html.light .provider-shell [class*="border-white/10"],
+html.light .provider-shell [class*="border-white/20"] {
+  border-color: #e2e8f0 !important;
+}
+
+html.light .provider-shell [class*="text-white"],
+html.light .provider-shell [class*="text-slate-200"] {
+  color: #0f172a !important;
+}
+
+html.light .provider-shell [class*="text-slate-400"] {
+  color: #475569 !important;
+}
+
+html.light .provider-shell [class*="text-slate-500"] {
+  color: #64748b !important;
+}

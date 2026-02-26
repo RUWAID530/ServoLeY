@@ -1,5 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const { randomUUID } = require('crypto');
 const { prisma } = require('../config/database');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const { 
@@ -9,6 +10,44 @@ const {
 } = require('../utils/orderManagement');
 
 const router = express.Router();
+
+const getAdminSettingsPayload = async (adminId) => {
+  const admin = await prisma.users.findUnique({
+    where: { id: adminId },
+    include: {
+      profiles: true,
+      notification_preferences: true
+    }
+  });
+
+  if (!admin) {
+    return null;
+  }
+
+  return {
+    account: {
+      id: admin.id,
+      email: admin.email || '',
+      phone: admin.phone || '',
+      firstName: admin.profiles?.firstName || '',
+      lastName: admin.profiles?.lastName || ''
+    },
+    preferences: {
+      pushEnabled: admin.notification_preferences?.pushEnabled ?? true,
+      emailEnabled: admin.notification_preferences?.emailEnabled ?? true,
+      smsEnabled: admin.notification_preferences?.smsEnabled ?? true,
+      orderUpdates: admin.notification_preferences?.orderUpdates ?? true,
+      messages: admin.notification_preferences?.messages ?? true,
+      promotions: admin.notification_preferences?.promotions ?? false,
+      systemAlerts: admin.notification_preferences?.systemAlerts ?? true
+    },
+    platform: {
+      name: process.env.VITE_PLATFORM_NAME || 'Servoley',
+      supportEmail: process.env.SUPPORT_EMAIL || 'support@servoley.com',
+      timezone: process.env.APP_TIMEZONE || 'Asia/Kolkata'
+    }
+  };
+};
 
 // ==================== DASHBOARD OVERVIEW ====================
 
@@ -148,6 +187,301 @@ router.get('/dashboard', authenticateToken, requireRole('ADMIN'), async (req, re
   }
 });
 
+// Admin analytics summary for admin dashboard
+router.get('/analytics', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const last30Days = new Date();
+    last30Days.setDate(last30Days.getDate() - 30);
+
+    const [
+      totalUsers,
+      totalAdmins,
+      totalProvidersUsers,
+      totalCustomers,
+      totalProviders,
+      pendingProviders,
+      approvedProviders,
+      suspendedProviders,
+      totalServices,
+      pendingServices,
+      approvedServices,
+      rejectedServices,
+      suspendedServices,
+      recentRevenue,
+      recentBookings
+    ] = await Promise.all([
+      prisma.users.count(),
+      prisma.users.count({ where: { userType: 'ADMIN' } }),
+      prisma.users.count({ where: { userType: 'PROVIDER' } }),
+      prisma.users.count({ where: { userType: 'CUSTOMER' } }),
+      prisma.providers.count(),
+      prisma.providers.count({ where: { isVerified: false } }),
+      prisma.providers.count({ where: { isVerified: true, isActive: true } }),
+      prisma.providers.count({ where: { isActive: false } }),
+      prisma.services.count(),
+      prisma.services.count({ where: { status: 'PENDING_VERIFICATION' } }),
+      prisma.services.count({ where: { status: 'ACTIVE' } }),
+      prisma.services.count({ where: { status: 'REJECTED' } }),
+      prisma.services.count({ where: { isActive: false } }),
+      prisma.orders.aggregate({
+        where: {
+          createdAt: { gte: last30Days },
+          status: 'COMPLETED'
+        },
+        _sum: { totalAmount: true }
+      }),
+      prisma.orders.count({
+        where: {
+          createdAt: { gte: last30Days }
+        }
+      })
+    ]);
+
+    return res.json({
+      success: true,
+      data: {
+        users: {
+          total: totalUsers,
+          byRole: {
+            admin: totalAdmins,
+            provider: totalProvidersUsers,
+            customer: totalCustomers
+          }
+        },
+        providers: {
+          total: totalProviders,
+          byStatus: {
+            pending: pendingProviders,
+            approved: approvedProviders,
+            rejected: 0,
+            suspended: suspendedProviders
+          }
+        },
+        services: {
+          total: totalServices,
+          byStatus: {
+            pending: pendingServices,
+            approved: approvedServices,
+            rejected: rejectedServices,
+            suspended: suspendedServices
+          }
+        },
+        revenue: {
+          last30Days: recentRevenue?._sum?.totalAmount || 0,
+          totalBookings: recentBookings
+        },
+        recentActivity: [
+          { action_type: 'PENDING_PROVIDERS', count: pendingProviders },
+          { action_type: 'PENDING_SERVICES', count: pendingServices },
+          { action_type: 'BOOKINGS_30D', count: recentBookings }
+        ]
+      }
+    });
+  } catch (error) {
+    console.error('Get admin analytics error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get admin analytics'
+    });
+  }
+});
+
+// ==================== PROVIDER VERIFICATION ====================
+
+// Get providers list for admin verification page
+router.get('/providers', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const { page = 1, limit = 10, status = 'all', search = '' } = req.query;
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNumber = Math.max(parseInt(limit, 10) || 10, 1);
+    const skip = (pageNumber - 1) * limitNumber;
+
+    const where = {};
+
+    if (status === 'pending') {
+      where.isVerified = false;
+      where.isActive = true;
+    } else if (status === 'approved') {
+      where.isVerified = true;
+      where.isActive = true;
+    } else if (status === 'rejected') {
+      where.isVerified = false;
+      where.isActive = false;
+    } else if (status === 'suspended') {
+      where.isVerified = true;
+      where.isActive = false;
+    }
+
+    if (search) {
+      where.OR = [
+        { businessName: { contains: search, mode: 'insensitive' } },
+        { category: { contains: search, mode: 'insensitive' } },
+        {
+          users: {
+            OR: [
+              { email: { contains: search, mode: 'insensitive' } },
+              { phone: { contains: search, mode: 'insensitive' } }
+            ]
+          }
+        }
+      ];
+    }
+
+    const [providers, total] = await Promise.all([
+      prisma.providers.findMany({
+        where,
+        include: {
+          users: {
+            include: {
+              profiles: true
+            }
+          },
+          services: {
+            select: {
+              status: true,
+              isActive: true
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limitNumber
+      }),
+      prisma.providers.count({ where })
+    ]);
+
+    const mapped = providers.map((provider) => {
+      const totalServices = provider.services.length;
+      const approvedServices = provider.services.filter(
+        (service) => service.status === 'ACTIVE' && service.isActive
+      ).length;
+
+      let verificationStatus = 'pending';
+      if (provider.isVerified && provider.isActive) verificationStatus = 'approved';
+      else if (!provider.isVerified && !provider.isActive) verificationStatus = 'rejected';
+      else if (provider.isVerified && !provider.isActive) verificationStatus = 'suspended';
+
+      return {
+        id: provider.id,
+        user_id: provider.userId,
+        business_name: provider.businessName,
+        business_type: provider.providerType,
+        category: provider.category,
+        verification_status: verificationStatus,
+        email: provider.users?.email || '',
+        phone: provider.users?.phone || '',
+        total_services: totalServices,
+        approved_services: approvedServices,
+        created_at: provider.createdAt
+      };
+    });
+
+    return res.json({
+      success: true,
+      data: mapped,
+      pagination: {
+        page: pageNumber,
+        limit: limitNumber,
+        total,
+        pages: Math.max(Math.ceil(total / limitNumber), 1)
+      }
+    });
+  } catch (error) {
+    console.error('Get admin providers error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load providers'
+    });
+  }
+});
+
+router.put('/providers/:id/approve', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).json({
+        success: false,
+        message: 'Not found'
+      });
+    }
+
+    const { id } = req.params;
+
+    const provider = await prisma.providers.update({
+      where: { id },
+      data: {
+        isVerified: true,
+        isActive: true,
+        updatedAt: new Date()
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: 'Provider approved successfully',
+      data: provider
+    });
+  } catch (error) {
+    console.error('Approve provider error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to approve provider'
+    });
+  }
+});
+
+router.put('/providers/:id/reject', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const provider = await prisma.providers.update({
+      where: { id },
+      data: {
+        isVerified: false,
+        isActive: false,
+        updatedAt: new Date()
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: 'Provider rejected successfully',
+      data: provider
+    });
+  } catch (error) {
+    console.error('Reject provider error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to reject provider'
+    });
+  }
+});
+
+router.put('/providers/:id/suspend', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const provider = await prisma.providers.update({
+      where: { id },
+      data: {
+        isActive: false,
+        updatedAt: new Date()
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: 'Provider suspended successfully',
+      data: provider
+    });
+  } catch (error) {
+    console.error('Suspend provider error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to suspend provider'
+    });
+  }
+});
+
 // ==================== ORDER REASSIGNMENT (ADMIN) ====================
 
 router.post('/orders/:orderId/reassign', [
@@ -195,8 +529,9 @@ router.post('/orders/:orderId/reassign', [
     });
 
     // Log admin action
-    await prisma.adminAction.create({
+    await prisma.admin_actions.create({
       data: {
+        id: randomUUID(),
         adminId: req.user.id,
         action: 'REASSIGN_ORDER',
         targetId: orderId,
@@ -260,6 +595,123 @@ router.get('/wallets', authenticateToken, requireRole('ADMIN'), async (req, res)
   } catch (e) {
     console.error('Admin wallets error:', e);
     res.status(500).json({ success: false, message: 'Failed to fetch wallets' });
+  }
+});
+
+// ==================== CUSTOMERS (ADMIN) ====================
+
+router.get('/customers', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = '', status = 'all' } = req.query;
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNumber = Math.max(parseInt(limit, 10) || 10, 1);
+    const skip = (pageNumber - 1) * limitNumber;
+
+    const where = {
+      userType: 'CUSTOMER'
+    };
+
+    if (status === 'active') {
+      where.isActive = true;
+      where.isBlocked = false;
+    } else if (status === 'blocked') {
+      where.isBlocked = true;
+    } else if (status === 'inactive') {
+      where.isActive = false;
+    }
+
+    if (search) {
+      where.OR = [
+        { email: { contains: String(search), mode: 'insensitive' } },
+        { phone: { contains: String(search), mode: 'insensitive' } },
+        {
+          profiles: {
+            is: {
+              OR: [
+                { firstName: { contains: String(search), mode: 'insensitive' } },
+                { lastName: { contains: String(search), mode: 'insensitive' } }
+              ]
+            }
+          }
+        }
+      ];
+    }
+
+    const [customers, total] = await Promise.all([
+      prisma.users.findMany({
+        where,
+        include: {
+          profiles: true,
+          wallets: true
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limitNumber
+      }),
+      prisma.users.count({ where })
+    ]);
+
+    const customerIds = customers.map((customer) => customer.id);
+    let bookingCounts = [];
+    let completedBookingCounts = [];
+
+    if (customerIds.length > 0) {
+      [bookingCounts, completedBookingCounts] = await Promise.all([
+        prisma.orders.groupBy({
+          by: ['customerId'],
+          where: {
+            customerId: { in: customerIds }
+          },
+          _count: { _all: true }
+        }),
+        prisma.orders.groupBy({
+          by: ['customerId'],
+          where: {
+            customerId: { in: customerIds },
+            status: 'COMPLETED'
+          },
+          _count: { _all: true }
+        })
+      ]);
+    }
+
+    const totalBookingsByCustomer = Object.fromEntries(
+      bookingCounts.map((entry) => [entry.customerId, entry._count._all || 0])
+    );
+    const completedBookingsByCustomer = Object.fromEntries(
+      completedBookingCounts.map((entry) => [entry.customerId, entry._count._all || 0])
+    );
+
+    const data = customers.map((customer) => ({
+      id: customer.id,
+      name: `${customer.profiles?.firstName || ''} ${customer.profiles?.lastName || ''}`.trim() || 'Customer',
+      email: customer.email || '',
+      phone: customer.phone || '',
+      isVerified: !!customer.isVerified,
+      isActive: !!customer.isActive,
+      isBlocked: !!customer.isBlocked,
+      walletBalance: Number(customer.wallets?.balance || 0),
+      totalBookings: totalBookingsByCustomer[customer.id] || 0,
+      completedBookings: completedBookingsByCustomer[customer.id] || 0,
+      joinedAt: customer.createdAt
+    }));
+
+    return res.json({
+      success: true,
+      data,
+      pagination: {
+        page: pageNumber,
+        limit: limitNumber,
+        total,
+        pages: Math.max(Math.ceil(total / limitNumber), 1)
+      }
+    });
+  } catch (error) {
+    console.error('Get admin customers error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load customers'
+    });
   }
 });
 
@@ -479,8 +931,9 @@ router.post('/users/:userId/block', [
     });
 
     // Log admin action
-    await prisma.adminAction.create({
+    await prisma.admin_actions.create({
       data: {
+        id: randomUUID(),
         adminId: req.user.id,
         action: isBlocked ? 'BLOCK_USER' : 'UNBLOCK_USER',
         targetId: userId,
@@ -835,8 +1288,9 @@ router.post('/orders/:orderId/cancel', [
     });
 
     // Log admin action
-    await prisma.adminAction.create({
+    await prisma.admin_actions.create({
       data: {
+        id: randomUUID(),
         adminId: req.user.id,
         action: 'CANCEL_ORDER',
         targetId: orderId,
@@ -1059,5 +1513,523 @@ router.get('/financial/revenue-chart', authenticateToken, requireRole('ADMIN'), 
   }
 });
 
-module.exports = router;
+// ==================== SERVICE VERIFICATION ====================
 
+const mapProviderStatus = (provider) => {
+  if (!provider) return 'pending';
+  if (provider.isVerified && provider.isActive) return 'approved';
+  if (!provider.isVerified && !provider.isActive) return 'rejected';
+  if (provider.isVerified && !provider.isActive) return 'suspended';
+  return 'pending';
+};
+
+const mapServiceStatus = (service) => {
+  if (!service) return 'pending';
+  if (service.status === 'PENDING_VERIFICATION' || service.status === 'PENDING') return 'pending';
+  if (service.status === 'REJECTED') return 'rejected';
+  if (!service.isActive) return 'suspended';
+  return 'approved';
+};
+
+const emitServiceStatusUpdate = (req, service, action) => {
+  const io = req.app.get('io');
+  if (!io || !service) return;
+
+  const payload = {
+    action,
+    serviceId: service.id,
+    providerId: service.providerId,
+    status: service.status,
+    isActive: service.isActive,
+    updatedAt: new Date().toISOString()
+  };
+
+  io.to('services:public').emit('services:updated', payload);
+
+  if (service.providerId) {
+    io.to(`provider:${service.providerId}`).emit('services:updated', payload);
+  }
+};
+
+router.get('/services', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const { page = 1, limit = 10, status = 'all', search = '' } = req.query;
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNumber = Math.max(parseInt(limit, 10) || 10, 1);
+    const skip = (pageNumber - 1) * limitNumber;
+
+    const where = {};
+
+    if (status === 'pending') {
+      where.status = 'PENDING_VERIFICATION';
+    } else if (status === 'approved') {
+      where.status = 'ACTIVE';
+      where.isActive = true;
+    } else if (status === 'rejected') {
+      where.status = 'REJECTED';
+    } else if (status === 'suspended') {
+      where.isActive = false;
+      where.status = { not: 'REJECTED' };
+    }
+
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { category: { contains: search, mode: 'insensitive' } },
+        {
+          providers: {
+            is: {
+              OR: [
+                { businessName: { contains: search, mode: 'insensitive' } },
+                {
+                  users: {
+                    is: {
+                      OR: [
+                        { email: { contains: search, mode: 'insensitive' } },
+                        { phone: { contains: search, mode: 'insensitive' } }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ];
+    }
+
+    const [services, total] = await Promise.all([
+      prisma.services.findMany({
+        where,
+        include: {
+          providers: {
+            include: {
+              users: {
+                select: {
+                  email: true,
+                  phone: true
+                }
+              }
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limitNumber
+      }),
+      prisma.services.count({ where })
+    ]);
+
+    const data = services.map((service) => ({
+      id: service.id,
+      provider_id: service.providerId,
+      title: service.name,
+      description: service.description,
+      category: service.category,
+      price: service.price,
+      status: mapServiceStatus(service),
+      business_name: service.providers?.businessName || 'Unknown Provider',
+      provider_email: service.providers?.users?.email || '',
+      provider_phone: service.providers?.users?.phone || '',
+      provider_status: mapProviderStatus(service.providers),
+      created_at: service.createdAt
+    }));
+
+    return res.json({
+      success: true,
+      data,
+      pagination: {
+        page: pageNumber,
+        limit: limitNumber,
+        total,
+        pages: Math.max(Math.ceil(total / limitNumber), 1)
+      }
+    });
+  } catch (error) {
+    console.error('Get admin services error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load services'
+    });
+  }
+});
+
+// Get all pending services for verification
+router.get('/services/pending', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    console.log('🔍 Admin fetching pending services for verification');
+    
+    const pendingServices = await prisma.services.findMany({
+      where: {
+        status: 'PENDING_VERIFICATION'
+      },
+      include: {
+        providers: {
+          include: {
+            users: {
+              include: {
+                profiles: {
+                  select: {
+                    firstName: true,
+                    lastName: true
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    console.log(`🔍 Admin fetching pending services for verification`);
+    console.log(`✅ Found ${pendingServices.length} pending services`);
+    console.log(`📋 Pending services:`, pendingServices.map(s => ({ id: s.id, name: s.name, status: s.status })));
+
+    // Transform data for frontend
+    const transformedServices = pendingServices.map(service => ({
+      id: service.id,
+      name: service.name,
+      category: service.category,
+      providerName: `${service.providers.users.profiles.firstName || ''} ${service.providers.users.profiles.lastName || ''}`.trim() || 'Unknown Provider',
+      providerEmail: service.providers.users.email,
+      price: service.price,
+      description: service.description,
+      submittedAt: service.createdAt,
+      status: service.status
+    }));
+
+    res.json({
+      success: true,
+      data: transformedServices,
+      message: `Found ${pendingServices.length} pending services`
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching pending services:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch pending services',
+      error: error?.message
+    });
+  }
+});
+
+// Approve a service
+router.put('/services/:id/approve', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    console.log('✅ Admin approving service:', id);
+
+    const updatedService = await prisma.services.update({
+      where: { id },
+      data: {
+        status: 'ACTIVE',
+        isActive: true, // Set to active when approved
+        updatedAt: new Date()
+      }
+    });
+
+    console.log('✅ Service approved successfully:', updatedService.id);
+
+    res.json({
+      success: true,
+      data: updatedService,
+      message: 'Service approved successfully'
+    });
+
+    emitServiceStatusUpdate(req, updatedService, 'SERVICE_APPROVED');
+
+  } catch (error) {
+    console.error('❌ Error approving service:', error);
+    if (error?.code === 'P2025') {
+      return res.status(404).json({
+        success: false,
+        message: 'Service not found'
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to approve service',
+      error: error?.message
+    });
+  }
+});
+
+// Reject a service
+router.put('/services/:id/reject', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    
+    console.log('❌ Admin rejecting service:', id, 'Reason:', reason);
+
+    const updatedService = await prisma.services.update({
+      where: { id },
+      data: {
+        status: 'REJECTED',
+        isActive: false, // Keep inactive when rejected
+        rejectionReason: reason,
+        updatedAt: new Date()
+      }
+    });
+
+    console.log('❌ Service rejected successfully:', updatedService.id);
+
+    res.json({
+      success: true,
+      data: updatedService,
+      message: 'Service rejected successfully'
+    });
+
+    emitServiceStatusUpdate(req, updatedService, 'SERVICE_REJECTED');
+
+  } catch (error) {
+    console.error('❌ Error rejecting service:', error);
+    if (error?.code === 'P2025') {
+      return res.status(404).json({
+        success: false,
+        message: 'Service not found'
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to reject service',
+      error: error?.message
+    });
+  }
+});
+
+// ==================== ADMIN AUDIT & SETTINGS ====================
+
+router.get('/audit-logs', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const requestedLimit = parseInt(req.query.limit, 10);
+    const limit = Number.isNaN(requestedLimit) ? 100 : Math.min(Math.max(requestedLimit, 1), 200);
+
+    const logs = await prisma.admin_actions.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: {
+        users: {
+          select: {
+            id: true,
+            email: true,
+            phone: true
+          }
+        }
+      }
+    });
+
+    const data = logs.map((log) => ({
+      id: log.id,
+      action: log.action,
+      targetId: log.targetId,
+      details: log.details,
+      createdAt: log.createdAt,
+      admin: {
+        id: log.users?.id || '',
+        email: log.users?.email || '',
+        phone: log.users?.phone || ''
+      }
+    }));
+
+    return res.json({
+      success: true,
+      data: {
+        logs: data
+      }
+    });
+  } catch (error) {
+    console.error('Get audit logs error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load audit logs'
+    });
+  }
+});
+
+router.get('/settings', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const data = await getAdminSettingsPayload(req.user.id);
+    if (!data) {
+      return res.status(404).json({
+        success: false,
+        message: 'Admin account not found'
+      });
+    }
+
+    return res.json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    console.error('Get admin settings error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load admin settings'
+    });
+  }
+});
+
+router.put('/settings', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const profileUpdates = {};
+    const notificationUpdates = {};
+    const now = new Date();
+
+    if (payload.phone !== undefined) {
+      const phone = String(payload.phone || '').trim();
+      if (!phone) {
+        return res.status(400).json({
+          success: false,
+          message: 'Phone cannot be empty'
+        });
+      }
+
+      await prisma.users.update({
+        where: { id: req.user.id },
+        data: {
+          phone,
+          updatedAt: now
+        }
+      });
+    }
+
+    if (payload.firstName !== undefined) {
+      profileUpdates.firstName = String(payload.firstName || '').trim();
+      if (!profileUpdates.firstName) {
+        return res.status(400).json({
+          success: false,
+          message: 'First name cannot be empty'
+        });
+      }
+    }
+
+    if (payload.lastName !== undefined) {
+      profileUpdates.lastName = String(payload.lastName || '').trim();
+      if (!profileUpdates.lastName) {
+        return res.status(400).json({
+          success: false,
+          message: 'Last name cannot be empty'
+        });
+      }
+    }
+
+    const preferenceKeys = [
+      'pushEnabled',
+      'emailEnabled',
+      'smsEnabled',
+      'orderUpdates',
+      'messages',
+      'promotions',
+      'systemAlerts'
+    ];
+
+    for (const key of preferenceKeys) {
+      if (payload.preferences && typeof payload.preferences[key] === 'boolean') {
+        notificationUpdates[key] = payload.preferences[key];
+      }
+    }
+
+    if (Object.keys(profileUpdates).length > 0) {
+      await prisma.profiles.upsert({
+        where: { userId: req.user.id },
+        update: {
+          ...profileUpdates,
+          updatedAt: now
+        },
+        create: {
+          id: randomUUID(),
+          userId: req.user.id,
+          firstName: profileUpdates.firstName || req.user.profiles?.firstName || 'Admin',
+          lastName: profileUpdates.lastName || req.user.profiles?.lastName || 'User',
+          updatedAt: now
+        }
+      });
+    }
+
+    if (Object.keys(notificationUpdates).length > 0) {
+      await prisma.notification_preferences.upsert({
+        where: { userId: req.user.id },
+        update: {
+          ...notificationUpdates,
+          updatedAt: now
+        },
+        create: {
+          id: randomUUID(),
+          userId: req.user.id,
+          pushEnabled: notificationUpdates.pushEnabled ?? true,
+          emailEnabled: notificationUpdates.emailEnabled ?? true,
+          smsEnabled: notificationUpdates.smsEnabled ?? true,
+          orderUpdates: notificationUpdates.orderUpdates ?? true,
+          messages: notificationUpdates.messages ?? true,
+          promotions: notificationUpdates.promotions ?? false,
+          systemAlerts: notificationUpdates.systemAlerts ?? true,
+          updatedAt: now
+        }
+      });
+    }
+
+    const data = await getAdminSettingsPayload(req.user.id);
+    return res.json({
+      success: true,
+      message: 'Settings updated successfully',
+      data
+    });
+  } catch (error) {
+    console.error('Update admin settings error:', error);
+    if (error?.code === 'P2002') {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number is already in use'
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update admin settings'
+    });
+  }
+});
+
+// Basic admin stats endpoint for dashboard cards
+router.get('/stats', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const [users, providers, bookings, pendingProviders] = await Promise.all([
+      prisma.users.count(),
+      prisma.providers.count(),
+      prisma.orders.count(),
+      prisma.providers.count({
+        where: {
+          isVerified: false,
+          isActive: true
+        }
+      })
+    ]);
+
+    return res.json({
+      success: true,
+      data: {
+        users,
+        providers,
+        bookings,
+        pendingProviders
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch admin stats'
+    });
+  }
+});
+
+module.exports = router;

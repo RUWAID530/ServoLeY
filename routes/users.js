@@ -1,9 +1,46 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const { prisma } = require('../config/database');
 const { authenticateToken, requireRole, requireVerification } = require('../middleware/auth');
+const { fileOwnershipManager } = require('../utils/fileOwnershipManager');
 
 const router = express.Router();
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = path.join(__dirname, '../uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'avatar-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  },
+  fileFilter: function (req, file, cb) {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  }
+});
 
 // Get user profile
 router.get('/profile', authenticateToken, async (req, res) => {
@@ -22,7 +59,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
       data: { user }
     });
   } catch (error) {
-    console.error('Get profile error:', error);
+    console.error('Get profile failed for user:', req.user?.id);
     res.status(500).json({
       success: false,
       message: 'Failed to get profile'
@@ -35,6 +72,8 @@ router.put('/profile', [
   authenticateToken,
   body('firstName').optional().notEmpty().withMessage('First name cannot be empty'),
   body('lastName').optional().notEmpty().withMessage('Last name cannot be empty'),
+  body('phone').optional().isMobilePhone('any').withMessage('Invalid phone number'),
+  body('email').optional().isEmail().withMessage('Invalid email format'),
   body('address').optional().isString().withMessage('Address must be a string'),
   body('pincode').optional().isPostalCode('IN').withMessage('Invalid pincode'),
   body('city').optional().isString().withMessage('City must be a string'),
@@ -50,9 +89,9 @@ router.put('/profile', [
       });
     }
 
-    const { firstName, lastName, address, pincode, city, state } = req.body;
+    const { firstName, lastName, phone, email, address, pincode, city, state } = req.body;
 
-    // Update profile
+    // Update user profile
     const updatedProfile = await prisma.profile.update({
       where: { userId: req.user.id },
       data: {
@@ -65,14 +104,35 @@ router.put('/profile', [
       }
     });
 
+    // Update user email/phone if provided
+    if (email || phone) {
+      await prisma.user.update({
+        where: { id: req.user.id },
+        data: {
+          ...(email && { email }),
+          ...(phone && { phone })
+        }
+      });
+    }
+
+    // Get updated user with all relations
+    const updatedUser = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: {
+        profile: true,
+        provider: true,
+        wallet: true
+      }
+    });
+
     res.json({
       success: true,
       message: 'Profile updated successfully',
-      data: { profile: updatedProfile }
+      data: { user: updatedUser }
     });
 
   } catch (error) {
-    console.error('Update profile error:', error);
+    console.error('Update profile failed for user:', req.user?.id);
     res.status(500).json({
       success: false,
       message: 'Failed to update profile'
@@ -81,19 +141,40 @@ router.put('/profile', [
 });
 
 // Upload profile picture
-router.post('/profile/avatar', authenticateToken, async (req, res) => {
+router.post('/profile/avatar', authenticateToken, upload.single('avatar'), async (req, res) => {
   try {
-    // This would integrate with Cloudinary or similar service
-    // For now, we'll just return a placeholder
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded'
+      });
+    }
+
+    const fileRecord = await fileOwnershipManager.storeFileOwnership({
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      userId: req.user.id,
+      fileSize: req.file.size,
+      mimeType: req.file.mimetype
+    });
+    const avatarUrl = fileRecord.url;
+
+    // Update user profile with avatar URL
+    const updatedProfile = await prisma.profile.update({
+      where: { userId: req.user.id },
+      data: { avatar: avatarUrl }
+    });
+
     res.json({
       success: true,
-      message: 'Avatar upload endpoint ready for implementation',
+      message: 'Avatar uploaded successfully',
       data: {
-        avatarUrl: 'https://via.placeholder.com/150'
+        avatarUrl: avatarUrl,
+        profile: updatedProfile
       }
     });
   } catch (error) {
-    console.error('Avatar upload error:', error);
+    console.error('Avatar upload failed for user:', req.user?.id);
     res.status(500).json({
       success: false,
       message: 'Failed to upload avatar'
@@ -126,7 +207,7 @@ router.get('/wallet', authenticateToken, async (req, res) => {
       data: { wallet }
     });
   } catch (error) {
-    console.error('Get wallet error:', error);
+    console.error('Get wallet failed for user:', req.user?.id);
     res.status(500).json({
       success: false,
       message: 'Failed to get wallet'
@@ -172,7 +253,7 @@ router.get('/transactions', authenticateToken, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get transactions error:', error);
+    console.error('Get transactions failed for user:', req.user?.id);
     res.status(500).json({
       success: false,
       message: 'Failed to get transactions'
@@ -227,7 +308,7 @@ router.get('/orders', authenticateToken, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get orders error:', error);
+    console.error('Get orders failed for user:', req.user?.id);
     res.status(500).json({
       success: false,
       message: 'Failed to get orders'
@@ -288,7 +369,7 @@ router.get('/reviews', authenticateToken, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get reviews error:', error);
+    console.error('Get reviews failed for user:', req.user?.id);
     res.status(500).json({
       success: false,
       message: 'Failed to get reviews'
@@ -309,7 +390,7 @@ router.post('/deactivate', authenticateToken, async (req, res) => {
       message: 'Account deactivated successfully'
     });
   } catch (error) {
-    console.error('Deactivate account error:', error);
+    console.error('Deactivate account failed for user:', req.user?.id);
     res.status(500).json({
       success: false,
       message: 'Failed to deactivate account'
@@ -357,7 +438,7 @@ router.get('/admin/users', authenticateToken, requireRole('ADMIN'), async (req, 
       }
     });
   } catch (error) {
-    console.error('Get users error:', error);
+    console.error('Get users failed for admin:', req.user?.id);
     res.status(500).json({
       success: false,
       message: 'Failed to get users'
@@ -382,7 +463,7 @@ router.post('/admin/users/:userId/block', authenticateToken, requireRole('ADMIN'
       data: { user }
     });
   } catch (error) {
-    console.error('Block user error:', error);
+    console.error('Block user failed for admin:', req.user?.id);
     res.status(500).json({
       success: false,
       message: 'Failed to update user status'

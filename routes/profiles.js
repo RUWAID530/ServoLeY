@@ -5,6 +5,12 @@ const { authenticateToken, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 
+
+router.use((req, res, next) => {
+  console.log('🔥 profiles route hit:', req.method, req.originalUrl);
+  next();
+});
+
 // Get profile
 router.get('/', authenticateToken, async (req, res) => {
   try {
@@ -84,15 +90,22 @@ router.put('/', [
 });
 
 // Upload avatar
+// Note: for now we accept a string (URL or data URL) and store it in `Profile.avatar`.
+// This makes avatar updates work end-to-end without requiring a full file storage integration.
 router.post('/avatar', authenticateToken, async (req, res) => {
   try {
-    // This would integrate with Cloudinary or similar service
-    // For now, we'll just return a placeholder
-    const avatarUrl = 'https://via.placeholder.com/150';
-    
+    const { avatar } = req.body;
+
+    if (!avatar || typeof avatar !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Avatar is required'
+      });
+    }
+
     const profile = await prisma.profile.update({
       where: { userId: req.user.id },
-      data: { avatar: avatarUrl }
+      data: { avatar }
     });
 
     res.json({
@@ -307,5 +320,6 @@ router.post('/admin/providers/:providerId/verify', authenticateToken, requireRol
 });
 
 module.exports = router;
+
 
 

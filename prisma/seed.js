@@ -1,10 +1,16 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('🌱 Starting database seeding...');
+
+  // Hash passwords for seed users - use strong random passwords
+  const adminPassword = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
+  const customerPassword = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
+  const providerPassword = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
 
   // Create admin user
   const adminUser = await prisma.user.upsert({
@@ -20,6 +26,7 @@ async function main() {
         create: {
           firstName: 'Admin',
           lastName: 'User',
+          passwordHash: adminPassword,
           address: 'Tirunelveli, Tamil Nadu',
           pincode: '627001',
           city: 'Tirunelveli',
@@ -51,6 +58,7 @@ async function main() {
         create: {
           firstName: 'John',
           lastName: 'Doe',
+          passwordHash: customerPassword,
           address: 'Palayamkottai, Tirunelveli',
           pincode: '627002',
           city: 'Tirunelveli',
@@ -82,6 +90,7 @@ async function main() {
         create: {
           firstName: 'Jane',
           lastName: 'Smith',
+          passwordHash: providerPassword,
           address: 'Pettai, Tirunelveli',
           pincode: '627003',
           city: 'Tirunelveli',

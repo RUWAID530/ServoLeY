@@ -1,15 +1,63 @@
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 
-// Initialize Razorpay
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET
-});
+const isMockPaymentConfigured = () => {
+  const raw = String(process.env.MOCK_PAYMENT || '').trim().toLowerCase();
+  return raw === 'true' || raw === '1' || raw === 'yes';
+};
+
+const hasRazorpayCredentials = () => {
+  const keyId = String(process.env.RAZORPAY_KEY_ID || '').trim();
+  const keySecret = String(process.env.RAZORPAY_KEY_SECRET || '').trim();
+  return Boolean(keyId && keySecret);
+};
+
+// For local/dev MVPs, automatically fall back to mock mode when creds are absent.
+const isMockPaymentEnabled = () => isMockPaymentConfigured() || (process.env.NODE_ENV !== 'production' && !hasRazorpayCredentials());
+
+let razorpay = null;
+
+const getRazorpayClient = () => {
+  if (isMockPaymentEnabled()) {
+    return null;
+  }
+
+  if (razorpay) {
+    return razorpay;
+  }
+
+  const keyId = String(process.env.RAZORPAY_KEY_ID || '').trim();
+  const keySecret = String(process.env.RAZORPAY_KEY_SECRET || '').trim();
+
+  if (!keyId || !keySecret) {
+    throw new Error('Razorpay credentials are not configured');
+  }
+
+  razorpay = new Razorpay({
+    key_id: keyId,
+    key_secret: keySecret
+  });
+
+  return razorpay;
+};
 
 // Create payment order
 const createPaymentOrder = async (amount, currency = 'INR', receipt = null) => {
+  if (isMockPaymentEnabled()) {
+    const safeAmount = Math.round(Number(amount) * 100) / 100;
+    const mockOrderId = `mock_order_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+    return {
+      success: true,
+      orderId: mockOrderId,
+      amount: safeAmount,
+      currency,
+      receipt: receipt || `mock_receipt_${Date.now()}`,
+      isMock: true
+    };
+  }
+
   try {
+    const client = getRazorpayClient();
     const options = {
       amount: Math.round(amount * 100), // Convert to paise
       currency,
@@ -20,15 +68,16 @@ const createPaymentOrder = async (amount, currency = 'INR', receipt = null) => {
       }
     };
 
-    const order = await razorpay.orders.create(options);
+    const order = await client.orders.create(options);
     
     console.log('Razorpay order created:', order.id);
     return {
       success: true,
       orderId: order.id,
-      amount: order.amount,
+      amount: order.amount / 100,
       currency: order.currency,
-      receipt: order.receipt
+      receipt: order.receipt,
+      isMock: false
     };
   } catch (error) {
     console.error('Razorpay order creation failed:', error);
@@ -38,6 +87,10 @@ const createPaymentOrder = async (amount, currency = 'INR', receipt = null) => {
 
 // Verify payment signature
 const verifyPaymentSignature = (orderId, paymentId, signature) => {
+  if (isMockPaymentEnabled()) {
+    return true;
+  }
+
   try {
     const body = orderId + '|' + paymentId;
     const expectedSignature = crypto
@@ -58,7 +111,8 @@ const verifyPaymentSignature = (orderId, paymentId, signature) => {
 // Capture payment
 const capturePayment = async (paymentId, amount) => {
   try {
-    const payment = await razorpay.payments.capture(
+    const client = getRazorpayClient();
+    const payment = await client.payments.capture(
       paymentId,
       Math.round(amount * 100), // Convert to paise
       'INR'
@@ -80,8 +134,22 @@ const capturePayment = async (paymentId, amount) => {
 
 // Get payment details
 const getPaymentDetails = async (paymentId) => {
+  if (isMockPaymentEnabled()) {
+    return {
+      success: true,
+      paymentId: paymentId || `mock_payment_${Date.now()}`,
+      status: 'captured',
+      amount: null,
+      currency: 'INR',
+      method: 'mock',
+      description: 'Mock payment details',
+      createdAt: new Date()
+    };
+  }
+
   try {
-    const payment = await razorpay.payments.fetch(paymentId);
+    const client = getRazorpayClient();
+    const payment = await client.payments.fetch(paymentId);
     
     return {
       success: true,
@@ -102,7 +170,8 @@ const getPaymentDetails = async (paymentId) => {
 // Create refund
 const createRefund = async (paymentId, amount, notes = {}) => {
   try {
-    const refund = await razorpay.payments.refund(paymentId, {
+    const client = getRazorpayClient();
+    const refund = await client.payments.refund(paymentId, {
       amount: Math.round(amount * 100), // Convert to paise
       notes: {
         platform: 'ServoLeY',
@@ -128,7 +197,8 @@ const createRefund = async (paymentId, amount, notes = {}) => {
 // Get refund details
 const getRefundDetails = async (refundId) => {
   try {
-    const refund = await razorpay.payments.fetchRefund(refundId);
+    const client = getRazorpayClient();
+    const refund = await client.payments.fetchRefund(refundId);
     
     return {
       success: true,
@@ -147,7 +217,8 @@ const getRefundDetails = async (refundId) => {
 // Create transfer to provider
 const createTransfer = async (accountId, amount, notes = {}) => {
   try {
-    const transfer = await razorpay.transfers.create({
+    const client = getRazorpayClient();
+    const transfer = await client.transfers.create({
       account: accountId,
       amount: Math.round(amount * 100), // Convert to paise
       currency: 'INR',

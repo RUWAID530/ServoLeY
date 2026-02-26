@@ -1,7 +1,10 @@
 const express = require('express');
+const twilio = require('twilio');
 const { body, validationResult } = require('express-validator');
 const { prisma } = require('../config/database');
 const { authenticateToken, requireRole, requireVerification } = require('../middleware/auth');
+const { webhookLimiter, messagingLimiter } = require('../middleware/rateLimits');
+const { strictBody } = require('../middleware/validation');
 const { 
   createMaskedCall, 
   getCallHistory, 
@@ -28,17 +31,38 @@ const {
   getNotificationPreferences,
   updateNotificationPreferences
 } = require('../utils/notifications');
+const { createSafeErrorResponse } = require('../utils/safeErrorResponses');
 
 const router = express.Router();
+
+const isDirectSupportChatAllowed = (senderType, receiverType) =>
+  senderType === 'ADMIN' || receiverType === 'ADMIN';
+
+const mapSupportContact = (user) => {
+  if (!user) return null;
+  const first = String(user.profiles?.firstName || '').trim();
+  const last = String(user.profiles?.lastName || '').trim();
+  const name = `${first} ${last}`.trim() || user.email || user.phone || 'Admin Support';
+
+  return {
+    id: user.id,
+    name,
+    email: user.email || '',
+    phone: user.phone || ''
+  };
+};
 
 // ==================== MASKED CALLING ====================
 
 // Create masked call
 router.post('/call', [
-  authenticateToken,
-  requireVerification,
-  body('providerId').notEmpty().withMessage('Provider ID is required'),
-  body('orderId').optional().isString().withMessage('Order ID must be a string')
+  ...strictBody([
+    authenticateToken,
+    requireVerification,
+    messagingLimiter,
+    body('providerId').isString().trim().isLength({ min: 1, max: 64 }).withMessage('Provider ID is required'),
+    body('orderId').optional().isString().trim().isLength({ min: 1, max: 64 }).withMessage('Order ID must be a string')
+  ])
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -56,7 +80,7 @@ router.post('/call', [
     if (req.user.userType === 'CUSTOMER') {
       // Customer can only call if they have an order with this provider
       if (orderId) {
-        const order = await prisma.order.findFirst({
+        const order = await prisma.orders.findFirst({
           where: {
             id: orderId,
             customerId: req.user.id,
@@ -82,11 +106,8 @@ router.post('/call', [
     });
 
   } catch (error) {
-    console.error('Create call error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to create call'
-    });
+    console.error('Create call failed for user:', req.user?.id);
+    return createSafeErrorResponse(res, error, 'Failed to create call');
   }
 });
 
@@ -137,6 +158,24 @@ router.post('/calls/:callSessionId/end', authenticateToken, async (req, res) => 
   try {
     const { callSessionId } = req.params;
 
+    // Verify user is part of the call
+    const call = await prisma.call_sessions.findFirst({
+      where: {
+        id: callSessionId,
+        OR: [
+          { customerId: req.user.id },
+          { providerId: req.user.id }
+        ]
+      }
+    });
+
+    if (!call) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized to end this call'
+      });
+    }
+
     const result = await endCall(callSessionId);
 
     res.json({
@@ -146,18 +185,52 @@ router.post('/calls/:callSessionId/end', authenticateToken, async (req, res) => 
     });
 
   } catch (error) {
-    console.error('End call error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to end call'
-    });
+    console.error('End call failed for user:', req.user?.id);
+    return createSafeErrorResponse(res, error, 'Failed to end call');
   }
 });
 
 // Handle call status webhook
-router.post('/call-status', express.raw({ type: 'application/x-www-form-urlencoded' }), async (req, res) => {
+router.post('/call-status', webhookLimiter, async (req, res) => {
   try {
-    const { CallSid, CallStatus, CallDuration } = req.body;
+    const params = {};
+    let CallSid;
+    let CallStatus;
+    let CallDuration;
+
+    if (Buffer.isBuffer(req.rawBody)) {
+      const form = new URLSearchParams(req.rawBody.toString('utf8'));
+      for (const [key, value] of form.entries()) {
+        params[key] = value;
+      }
+      CallSid = form.get('CallSid');
+      CallStatus = form.get('CallStatus');
+      CallDuration = form.get('CallDuration');
+    } else {
+      Object.assign(params, req.body || {});
+      CallSid = req.body?.CallSid;
+      CallStatus = req.body?.CallStatus;
+      CallDuration = req.body?.CallDuration;
+    }
+
+    if (!CallSid) {
+      return res.status(400).json({ success: false, message: 'Invalid webhook payload' });
+    }
+
+    const twilioSignature = String(req.headers['x-twilio-signature'] || '').trim();
+    const apiBaseUrl = String(process.env.API_BASE_URL || '').trim().replace(/\/$/, '');
+    const twilioAuthToken = String(process.env.TWILIO_AUTH_TOKEN || '').trim();
+    
+    // Always require webhook signature validation - no bypass allowed
+    if (!twilioSignature || !apiBaseUrl || !twilioAuthToken) {
+      return res.status(403).json({ success: false, message: 'Webhook signature validation required - missing configuration' });
+    }
+
+    const webhookUrl = `${apiBaseUrl}/api/communication/call-status`;
+    const isValid = twilio.validateRequest(twilioAuthToken, twilioSignature, webhookUrl, params);
+    if (!isValid) {
+      return res.status(403).json({ success: false, message: 'Invalid webhook signature' });
+    }
 
     const { handleCallStatusUpdate } = require('../utils/maskedCalling');
     await handleCallStatusUpdate(CallSid, CallStatus, CallDuration);
@@ -165,20 +238,70 @@ router.post('/call-status', express.raw({ type: 'application/x-www-form-urlencod
     res.json({ success: true });
 
   } catch (error) {
-    console.error('Call status webhook error:', error);
+    console.error('Call status webhook processing failed');
     res.status(500).json({ success: false });
   }
 });
 
 // ==================== CHAT MESSAGES ====================
 
+// Get support admin contact for live chat bootstrapping
+router.get('/support/admin-contact', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.userType === 'ADMIN') {
+      return res.json({
+        success: true,
+        data: { admin: mapSupportContact(req.user) }
+      });
+    }
+
+    const admin = await prisma.users.findFirst({
+      where: {
+        userType: 'ADMIN',
+        isActive: true,
+        isBlocked: false
+      },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        profiles: {
+          select: {
+            firstName: true,
+            lastName: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: 'Support admin is not available right now'
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: { admin: mapSupportContact(admin) }
+    });
+  } catch (error) {
+    console.error('Get support admin contact failed for user:', req.user?.id);
+    return createSafeErrorResponse(res, error, 'Failed to load support contact');
+  }
+});
+
 // Send message
 router.post('/messages', [
-  authenticateToken,
-  requireVerification,
-  body('receiverId').notEmpty().withMessage('Receiver ID is required'),
-  body('content').notEmpty().withMessage('Message content is required'),
-  body('orderId').optional().isString().withMessage('Order ID must be a string')
+  ...strictBody([
+    authenticateToken,
+    requireVerification,
+    messagingLimiter,
+    body('receiverId').isString().trim().isLength({ min: 1, max: 64 }).withMessage('Receiver ID is required'),
+    body('content').isString().trim().isLength({ min: 1, max: 2000 }).withMessage('Message content is required'),
+    body('orderId').optional().isString().trim().isLength({ min: 1, max: 64 }).withMessage('Order ID must be a string')
+  ])
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -192,9 +315,35 @@ router.post('/messages', [
 
     const { receiverId, content, orderId } = req.body;
 
+    if (receiverId === req.user.id) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot message yourself'
+      });
+    }
+
+    const receiver = await prisma.users.findFirst({
+      where: {
+        id: receiverId,
+        isActive: true,
+        isBlocked: false
+      },
+      select: {
+        id: true,
+        userType: true
+      }
+    });
+
+    if (!receiver) {
+      return res.status(404).json({
+        success: false,
+        message: 'Receiver account not found'
+      });
+    }
+
     // Check if users can communicate
     if (orderId) {
-      const order = await prisma.order.findFirst({
+      const order = await prisma.orders.findFirst({
         where: {
           id: orderId,
           OR: [
@@ -210,6 +359,11 @@ router.post('/messages', [
           message: 'No order found between these users'
         });
       }
+    } else if (!isDirectSupportChatAllowed(req.user.userType, receiver.userType)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Direct messaging is only available for admin support chat'
+      });
     }
 
     const message = await sendMessage(req.user.id, receiverId, content, orderId);
@@ -221,11 +375,8 @@ router.post('/messages', [
     });
 
   } catch (error) {
-    console.error('Send message error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to send message'
-    });
+    console.error('Send message failed for user:', req.user?.id);
+    return createSafeErrorResponse(res, error, 'Failed to send message');
   }
 });
 
@@ -235,7 +386,60 @@ router.get('/messages/conversation/:userId', authenticateToken, async (req, res)
     const { userId } = req.params;
     const { page = 1, limit = 50, orderId } = req.query;
 
-    const result = await getConversation(req.user.id, userId, orderId, parseInt(page), parseInt(limit));
+    if (userId === req.user.id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid conversation target'
+      });
+    }
+
+    const participant = await prisma.users.findFirst({
+      where: {
+        id: userId,
+        isActive: true,
+        isBlocked: false
+      },
+      select: {
+        id: true,
+        userType: true
+      }
+    });
+
+    if (!participant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Conversation participant not found'
+      });
+    }
+
+    const normalizedOrderId = typeof orderId === 'string' ? orderId : null;
+
+    if (normalizedOrderId) {
+      const order = await prisma.orders.findFirst({
+        where: {
+          id: normalizedOrderId,
+          OR: [
+            { customerId: req.user.id, providerId: userId },
+            { customerId: userId, providerId: req.user.id }
+          ]
+        },
+        select: { id: true }
+      });
+
+      if (!order) {
+        return res.status(403).json({
+          success: false,
+          message: 'No order found between these users'
+        });
+      }
+    } else if (!isDirectSupportChatAllowed(req.user.userType, participant.userType)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Direct conversation is only available for admin support chat'
+      });
+    }
+
+    const result = await getConversation(req.user.id, userId, normalizedOrderId, parseInt(page), parseInt(limit));
 
     res.json({
       success: true,
@@ -274,9 +478,12 @@ router.get('/messages/conversations', authenticateToken, async (req, res) => {
 
 // Mark messages as read
 router.post('/messages/read', [
-  authenticateToken,
-  body('senderId').notEmpty().withMessage('Sender ID is required'),
-  body('orderId').optional().isString().withMessage('Order ID must be a string')
+  ...strictBody([
+    authenticateToken,
+    messagingLimiter,
+    body('senderId').isString().trim().isLength({ min: 1, max: 64 }).withMessage('Sender ID is required'),
+    body('orderId').optional().isString().trim().isLength({ min: 1, max: 64 }).withMessage('Order ID must be a string')
+  ])
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -290,6 +497,50 @@ router.post('/messages/read', [
 
     const { senderId, orderId } = req.body;
 
+    const sender = await prisma.users.findFirst({
+      where: {
+        id: senderId,
+        isActive: true,
+        isBlocked: false
+      },
+      select: {
+        id: true,
+        userType: true
+      }
+    });
+
+    if (!sender) {
+      return res.status(404).json({
+        success: false,
+        message: 'Sender account not found'
+      });
+    }
+
+    if (orderId) {
+      const order = await prisma.orders.findFirst({
+        where: {
+          id: orderId,
+          OR: [
+            { customerId: req.user.id, providerId: senderId },
+            { customerId: senderId, providerId: req.user.id }
+          ]
+        },
+        select: { id: true }
+      });
+
+      if (!order) {
+        return res.status(403).json({
+          success: false,
+          message: 'No order found between these users'
+        });
+      }
+    } else if (!isDirectSupportChatAllowed(req.user.userType, sender.userType)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Direct messaging is only available for admin support chat'
+      });
+    }
+
     const result = await markMessagesAsRead(req.user.id, senderId, orderId);
 
     res.json({
@@ -299,11 +550,8 @@ router.post('/messages/read', [
     });
 
   } catch (error) {
-    console.error('Mark messages as read error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to mark messages as read'
-    });
+    console.error('Mark messages as read failed for user:', req.user?.id);
+    return createSafeErrorResponse(res, error, 'Failed to mark messages as read');
   }
 });
 
@@ -340,11 +588,8 @@ router.delete('/messages/:messageId', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Delete message error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to delete message'
-    });
+    console.error('Delete message failed for user:', req.user?.id);
+    return createSafeErrorResponse(res, error, 'Failed to delete message');
   }
 });
 
@@ -434,11 +679,8 @@ router.post('/notifications/:notificationId/read', authenticateToken, async (req
     });
 
   } catch (error) {
-    console.error('Mark notification as read error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to mark notification as read'
-    });
+    console.error('Mark notification as read failed for user:', req.user?.id);
+    return createSafeErrorResponse(res, error, 'Failed to mark notification as read');
   }
 });
 
@@ -495,11 +737,8 @@ router.delete('/notifications/:notificationId', authenticateToken, async (req, r
     });
 
   } catch (error) {
-    console.error('Delete notification error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to delete notification'
-    });
+    console.error('Delete notification failed for user:', req.user?.id);
+    return createSafeErrorResponse(res, error, 'Failed to delete notification');
   }
 });
 
@@ -524,14 +763,16 @@ router.get('/notifications/preferences', authenticateToken, async (req, res) => 
 
 // Update notification preferences
 router.put('/notifications/preferences', [
-  authenticateToken,
-  body('pushEnabled').optional().isBoolean().withMessage('Push enabled must be boolean'),
-  body('emailEnabled').optional().isBoolean().withMessage('Email enabled must be boolean'),
-  body('smsEnabled').optional().isBoolean().withMessage('SMS enabled must be boolean'),
-  body('orderUpdates').optional().isBoolean().withMessage('Order updates must be boolean'),
-  body('messages').optional().isBoolean().withMessage('Messages must be boolean'),
-  body('promotions').optional().isBoolean().withMessage('Promotions must be boolean'),
-  body('systemAlerts').optional().isBoolean().withMessage('System alerts must be boolean')
+  ...strictBody([
+    authenticateToken,
+    body('pushEnabled').optional().isBoolean().withMessage('Push enabled must be boolean'),
+    body('emailEnabled').optional().isBoolean().withMessage('Email enabled must be boolean'),
+    body('smsEnabled').optional().isBoolean().withMessage('SMS enabled must be boolean'),
+    body('orderUpdates').optional().isBoolean().withMessage('Order updates must be boolean'),
+    body('messages').optional().isBoolean().withMessage('Messages must be boolean'),
+    body('promotions').optional().isBoolean().withMessage('Promotions must be boolean'),
+    body('systemAlerts').optional().isBoolean().withMessage('System alerts must be boolean')
+  ])
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -562,10 +803,12 @@ router.put('/notifications/preferences', [
 
 // Send test notification
 router.post('/notifications/test', [
-  authenticateToken,
-  body('type').isIn(['PUSH', 'EMAIL', 'SMS']).withMessage('Invalid notification type'),
-  body('title').notEmpty().withMessage('Title is required'),
-  body('body').notEmpty().withMessage('Body is required')
+  ...strictBody([
+    authenticateToken,
+    body('type').isIn(['PUSH', 'EMAIL', 'SMS']).withMessage('Invalid notification type'),
+    body('title').isString().trim().isLength({ min: 1, max: 120 }).withMessage('Title is required'),
+    body('body').isString().trim().isLength({ min: 1, max: 2000 }).withMessage('Body is required')
+  ])
 ], async (req, res) => {
   try {
     const errors = validationResult(req);

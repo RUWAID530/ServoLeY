@@ -48,19 +48,22 @@ A unified platform connecting service providers with customers in Tirunelveli.
 - `src/App.tsx` - Main application component with routing
 - `src/main.tsx` - Application entry point
 - `src/styles.css` - Global styles and Tailwind imports
+- `src/services/` - Frontend API clients only (no backend runtime code)
 
 ## API Integration
 
-The application connects to a backend API at `http://localhost:8083` (configurable via environment variable `VITE_API_URL`).
+The application connects to a backend API via `VITE_API_URL` (for local development: `http://localhost:8086`).
+This `unified-pwa` folder is frontend-only. Backend runtime and database setup live outside this folder.
 
 ## Environment Variables
 
-- `VITE_API_URL` - Backend API URL (default: http://localhost:8083)
+- `VITE_API_URL` - Backend API URL (default: http://localhost:8086)
 - `PORT` - Frontend port (default: 5175)
 
 ## Deployment
 
-The application is configured to work with Project IDX and can be deployed with minimal configuration.
+Deploy frontend from this folder.
+Deploy backend and database from the repository root (`server.js`, `routes/`, `config/`, `database/`, `prisma/`).
 
 ## License
 

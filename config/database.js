@@ -1,32 +1,59 @@
 const { PrismaClient } = require('@prisma/client');
+const { logger } = require('../utils/logger');
 
-const prisma = new PrismaClient({
-  log: process.env.NODE_ENV === 'development' ? ['query', 'info', 'warn', 'error'] : ['error'],
-  errorFormat: 'pretty',
-});
+const prisma =
+  global.__SERVOLEY_PRISMA__ ||
+  new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
+    errorFormat: process.env.NODE_ENV === 'production' ? 'minimal' : 'pretty'
+  });
 
-// Database connection test
-const connectDatabase = async () => {
-  try {
-    await prisma.$connect();
-    console.log('✅ Database connected successfully');
-  } catch (error) {
-    console.error('❌ Database connection failed:', error);
-    process.exit(1);
+const aliasModels = () => {
+  const aliases = {
+    user: 'users',
+    profile: 'profiles',
+    provider: 'providers',
+    service: 'services',
+    order: 'orders',
+    message: 'messages',
+    ticket: 'tickets',
+    wallet: 'wallets',
+    transaction: 'transactions',
+    paymentOrder: 'payment_orders',
+    notification: 'notifications'
+  };
+
+  for (const [alias, target] of Object.entries(aliases)) {
+    if (!prisma[alias] && prisma[target]) {
+      prisma[alias] = prisma[target];
+    }
   }
 };
 
-// Graceful shutdown
+aliasModels();
+
+if (!global.__SERVOLEY_PRISMA__) {
+  global.__SERVOLEY_PRISMA__ = prisma;
+}
+
+const connectDatabase = async () => {
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL is not configured');
+  }
+
+  await prisma.$connect();
+  logger.info('Database connected');
+};
+
 const disconnectDatabase = async () => {
   try {
     await prisma.$disconnect();
-    console.log('✅ Database disconnected successfully');
+    logger.info('Database disconnected');
   } catch (error) {
-    console.error('❌ Database disconnection failed:', error);
+    logger.error('Database disconnection failed', error);
   }
 };
 
-// Handle process termination
 process.on('SIGINT', disconnectDatabase);
 process.on('SIGTERM', disconnectDatabase);
 
@@ -35,5 +62,3 @@ module.exports = {
   connectDatabase,
   disconnectDatabase
 };
-
-

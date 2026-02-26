@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,20 +7,407 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// User Types Enum
-enum UserType {
-  CUSTOMER
-  PROVIDER
-  ADMIN
+model admin_actions {
+  id        String   @id
+  adminId   String
+  action    String
+  targetId  String
+  details   Json?
+  createdAt DateTime @default(now())
+  users     users    @relation(fields: [adminId], references: [id])
 }
 
-// Provider Types Enum
-enum ProviderType {
-  FREELANCER
-  STORE
+model call_logs {
+  id            String        @id
+  callSessionId String
+  status        String
+  duration      Int?
+  timestamp     DateTime      @default(now())
+  call_sessions call_sessions @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
 }
 
-// Order Status Enum
+model call_sessions {
+  id                                    String      @id
+  customerId                            String
+  providerId                            String
+  orderId                               String?
+  twilioCallSid                         String?
+  customerPhone                         String
+  providerPhone                         String
+  status                                String      @default("INITIATED")
+  duration                              Int?
+  startedAt                             DateTime?
+  endedAt                               DateTime?
+  createdAt                             DateTime    @default(now())
+  updatedAt                             DateTime
+  call_logs                             call_logs[]
+  users_call_sessions_customerIdTousers users       @relation("call_sessions_customerIdTousers", fields: [customerId], references: [id])
+  orders                                orders?     @relation(fields: [orderId], references: [id])
+  users_call_sessions_providerIdTousers users       @relation("call_sessions_providerIdTousers", fields: [providerId], references: [id])
+}
+
+model faqs {
+  id        String   @id
+  question  String
+  answer    String
+  category  String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+}
+
+model messages {
+  id                               String   @id
+  senderId                         String
+  receiverId                       String
+  content                          String
+  orderId                          String?
+  createdAt                        DateTime @default(now())
+  users_messages_receiverIdTousers users    @relation("messages_receiverIdTousers", fields: [receiverId], references: [id])
+  users_messages_senderIdTousers   users    @relation("messages_senderIdTousers", fields: [senderId], references: [id])
+}
+
+model notification_preferences {
+  id           String   @id
+  userId       String   @unique
+  pushEnabled  Boolean  @default(true)
+  emailEnabled Boolean  @default(true)
+  smsEnabled   Boolean  @default(true)
+  orderUpdates Boolean  @default(true)
+  messages     Boolean  @default(true)
+  promotions   Boolean  @default(false)
+  systemAlerts Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime
+  users        users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model notification_tokens {
+  id        String   @id
+  userId    String
+  token     String   @unique
+  platform  String?
+  createdAt DateTime @default(now())
+  users     users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model notifications {
+  id        String    @id
+  userId    String
+  title     String
+  body      String
+  data      Json?
+  type      String
+  status    String    @default("SENT")
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+  users     users     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model orders {
+  id                             String               @id
+  customerId                     String
+  providerId                     String
+  serviceId                      String
+  status                         OrderStatus          @default(PENDING)
+  totalAmount                    Float
+  commission                     Float                @default(0)
+  serviceDate                    DateTime
+  address                        String
+  notes                          String?
+  cancelledBy                    String?
+  cancelReason                   String?
+  cancelledAt                    DateTime?
+  completedAt                    DateTime?
+  createdAt                      DateTime             @default(now())
+  updatedAt                      DateTime
+  call_sessions                  call_sessions[]
+  users_orders_customerIdTousers users                @relation("orders_customerIdTousers", fields: [customerId], references: [id])
+  users_orders_providerIdTousers users                @relation("orders_providerIdTousers", fields: [providerId], references: [id])
+  services                       services             @relation(fields: [serviceId], references: [id])
+  reviews                        reviews?
+  virtual_assignments            virtual_assignments?
+}
+
+model otps {
+  id        String   @id
+  userId    String
+  code      String
+  type      String
+  isUsed    Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  users     users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model payment_orders {
+  id            String   @id
+  userId        String
+  orderId       String   @unique
+  paymentId     String?
+  amount        Float
+  currency      String   @default("INR")
+  paymentMethod String
+  status        String   @default("PENDING")
+  type          String
+  signature     String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime
+  users         users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model profiles {
+  id             String   @id
+  userId         String   @unique
+  firstName      String
+  lastName       String
+  avatar         String?
+  address        String?
+  pincode        String?
+  city           String?
+  state          String?
+  country        String   @default("India")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime
+  passwordHash   String?
+  googleId       String?
+  googleVerified Boolean  @default(false)
+  users          users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model provider_locations {
+  id         String    @id
+  providerId String
+  lat        Float
+  lng        Float
+  address    String?
+  zoneId     String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime
+  providers  providers @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  zones      zones?    @relation(fields: [zoneId], references: [id])
+
+  @@index([lat, lng])
+  @@index([providerId])
+  @@index([zoneId])
+}
+
+model providers {
+  id                 String               @id
+  userId             String               @unique
+  businessName       String
+  providerType       ProviderType
+  category           String
+  area               String
+  address            String
+  panNumber          String   // Encrypted JSON: {encrypted, iv, authTag}
+  aadhaarNumber      String   // Encrypted JSON: {encrypted, iv, authTag}
+  gstNumber          String?  // Encrypted JSON: {encrypted, iv, authTag}
+  bankAccount        String?  // Encrypted JSON: {encrypted, iv, authTag}
+  upiId              String?  // Encrypted JSON: {encrypted, iv, authTag}
+  isVerified         Boolean              @default(false)
+  isActive           Boolean              @default(true)
+  rating             Float                @default(0)
+  totalOrders        Int                  @default(0)
+  isOnline           Boolean              @default(false)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime
+  provider_locations provider_locations[]
+  users              users                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviews            reviews[]
+  services           services[]
+}
+
+model report_schedules {
+  id         String   @id
+  adminId    String
+  reportType String
+  frequency  String
+  email      String
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime
+  users      users    @relation(fields: [adminId], references: [id])
+}
+
+model reviews {
+  id                              String     @id
+  orderId                         String     @unique
+  reviewerId                      String
+  revieweeId                      String
+  providerId                      String?
+  rating                          Int
+  comment                         String?
+  createdAt                       DateTime   @default(now())
+  orders                          orders     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  providers                       providers? @relation(fields: [providerId], references: [id])
+  users_reviews_revieweeIdTousers users      @relation("reviews_revieweeIdTousers", fields: [revieweeId], references: [id])
+  users_reviews_reviewerIdTousers users      @relation("reviews_reviewerIdTousers", fields: [reviewerId], references: [id])
+}
+
+model services {
+  id              String    @id
+  providerId      String
+  name            String
+  description     String
+  category        String
+  price           Float
+  basePrice       Float?
+  offerPercent    Int?      @default(0)
+  estimatedTime   Int?
+  warrantyMonths  Int?
+  duration        Int
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime
+  rejectionReason String?
+  status          String    @default("ACTIVE")
+  orders          orders[]
+  providers       providers @relation(fields: [providerId], references: [id], onDelete: Cascade)
+}
+
+model tickets {
+  id          String   @id
+  userId      String
+  subject     String
+  description String
+  status      String   @default("OPEN")
+  priority    String   @default("MEDIUM")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+  users       users    @relation(fields: [userId], references: [id])
+}
+
+model transactions {
+  id            String          @id
+  walletId      String
+  amount        Float
+  type          TransactionType
+  description   String
+  paymentMethod PaymentMethod?
+  orderId       String?
+  createdAt     DateTime        @default(now())
+  wallets       wallets         @relation(fields: [walletId], references: [id], onDelete: Cascade)
+}
+
+model user_payment_methods {
+  id          String   @id
+  userId      String
+  type        String
+  provider    String?
+  upiId       String?
+  cardNumber  String?
+  cardName    String?
+  expiryMonth String?
+  expiryYear  String?
+  last4       String?
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+  users       users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model user_verifications {
+  id                 String    @id
+  userId             String    @unique
+  idType             String
+  idNumber           String
+  idFrontImage       String
+  idBackImage        String?
+  addressProofType   String
+  addressProofNumber String
+  addressProofImage  String
+  verificationStatus String    @default("pending")
+  verifiedAt         DateTime?
+  verifiedBy         String?
+  rejectionReason    String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime
+  users              users     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model users {
+  id                                            String                    @id
+  email                                         String?                   @unique
+  phone                                         String?                   @unique
+  userType                                      UserType
+  isVerified                                    Boolean                   @default(false)
+  isActive                                      Boolean                   @default(true)
+  isBlocked                                     Boolean                   @default(false)
+  tokenVersion                                   Int                       @default(0)
+  createdAt                                     DateTime                  @default(now())
+  updatedAt                                     DateTime
+  cancellationsCount                            Int                       @default(0)
+  isSuspect                                     Boolean                   @default(false)
+  admin_actions                                 admin_actions[]
+  auth_refresh_sessions                         auth_refresh_sessions[]
+  call_sessions_call_sessions_customerIdTousers call_sessions[]           @relation("call_sessions_customerIdTousers")
+  call_sessions_call_sessions_providerIdTousers call_sessions[]           @relation("call_sessions_providerIdTousers")
+  messages_messages_receiverIdTousers           messages[]                @relation("messages_receiverIdTousers")
+  messages_messages_senderIdTousers             messages[]                @relation("messages_senderIdTousers")
+  notification_preferences                      notification_preferences?
+  notification_tokens                           notification_tokens[]
+  notifications                                 notifications[]
+  orders_orders_customerIdTousers               orders[]                  @relation("orders_customerIdTousers")
+  orders_orders_providerIdTousers               orders[]                  @relation("orders_providerIdTousers")
+  otps                                          otps[]
+  payment_orders                                payment_orders[]
+  profiles                                      profiles?
+  providers                                     providers?
+  report_schedules                              report_schedules[]
+  reviews_reviews_revieweeIdTousers             reviews[]                 @relation("reviews_revieweeIdTousers")
+  reviews_reviews_reviewerIdTousers             reviews[]                 @relation("reviews_reviewerIdTousers")
+  tickets                                       tickets[]
+  user_payment_methods                          user_payment_methods[]
+  user_verifications                            user_verifications?
+  wallets                                       wallets?
+}
+
+model virtual_assignments {
+  id              String          @id
+  orderId         String          @unique
+  virtualNumberId String
+  status          String          @default("ASSIGNED")
+  assignedAt      DateTime        @default(now())
+  releasedAt      DateTime?
+  orders          orders          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  virtual_numbers virtual_numbers @relation(fields: [virtualNumberId], references: [id], onDelete: Cascade)
+}
+
+model virtual_numbers {
+  id                  String                @id
+  phoneNumber         String                @unique
+  isAssigned          Boolean               @default(false)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime
+  virtual_assignments virtual_assignments[]
+}
+
+model wallets {
+  id           String         @id
+  userId       String         @unique
+  balance      Float          @default(0)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime
+  transactions transactions[]
+  users        users          @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model zones {
+  id                 String               @id
+  name               String               @unique
+  city               String
+  polygon            Json
+  isActive           Boolean              @default(true)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime
+  provider_locations provider_locations[]
+
+  @@index([isActive])
+}
+
 enum OrderStatus {
   PENDING
   ACCEPTED
@@ -33,7 +417,18 @@ enum OrderStatus {
   REJECTED
 }
 
-// Transaction Types Enum
+enum PaymentMethod {
+  UPI
+  CARD
+  NET_BANKING
+  WALLET
+}
+
+enum ProviderType {
+  FREELANCER
+  STORE
+}
+
 enum TransactionType {
   CREDIT
   DEBIT
@@ -42,531 +437,39 @@ enum TransactionType {
   WITHDRAWAL
 }
 
-// Payment Methods Enum
-enum PaymentMethod {
-  UPI
-  CARD
-  NET_BANKING
-  WALLET
+enum UserType {
+  CUSTOMER
+  PROVIDER
+  ADMIN
 }
 
-// User Model
-model User {
-  id          String   @id @default(cuid())
-  email       String?  @unique
-  phone       String?  @unique
-  userType    UserType
-  isVerified  Boolean  @default(false)
-  isActive    Boolean  @default(true)
-  isBlocked   Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+model file_ownership {
+  id                 String               @id
+  filename           String               @unique
+  originalName       String
+  userId             String
+  fileSize           Int
+  mimeType           String
+  uploadedAt         DateTime             @default(now())
+  users              users                @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Profile Information
-  profile     Profile?
-  
-  // Provider specific fields
-  provider    Provider?
-  
-  // Wallet
-  wallet      Wallet?
-  
-  // Orders
-  customerOrders Order[] @relation("CustomerOrders")
-  providerOrders Order[] @relation("ProviderOrders")
-  
-  // Reviews
-  reviewsGiven    Review[] @relation("Reviewer")
-  reviewsReceived Review[] @relation("Reviewee")
-  
-  // Support Tickets
-  supportTickets Ticket[] @relation("UserTickets")
-  
-  // OTP
-  otps         OTP[]
-  
-  // Chat Messages
-  sentMessages     Message[] @relation("Sender")
-  receivedMessages Message[] @relation("Receiver")
-  
-  // Payment Orders
-  paymentOrders PaymentOrder[]
-  
-  // Call Sessions
-  customerCalls CallSession[] @relation("CustomerCalls")
-  providerCalls CallSession[] @relation("ProviderCalls")
-  
-  // Notifications
-  notifications Notification[]
-  notificationTokens NotificationToken[]
-  notificationPreferences NotificationPreferences?
-  
-  // Admin Actions
-  adminActions AdminAction[] @relation("AdminActions")
-  
-  // Report Schedules
-  reportSchedules ReportSchedule[] @relation("ReportSchedules")
-
-  // Cancellations and suspect flag
-  cancellationsCount Int      @default(0)
-  isSuspect          Boolean  @default(false)
-
-  @@map("users")
+  @@index([userId])
+  @@index([uploadedAt])
 }
 
-// Profile Model
-model Profile {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  firstName String
-  lastName  String
-  avatar    String?
-  address   String?
-  pincode   String?
-  city      String?
-  state     String?
-  country   String   @default("India")
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model auth_refresh_sessions {
+  id                String    @id
+  user_id           String
+  jti               String    @unique
+  token_hash        String
+  user_agent        String?
+  ip                String?
+  expires_at        DateTime
+  revoked_at        DateTime?
+  rotated_to_jti    String?
+  created_at        DateTime  @default(now())
+  users             users     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
-  @@map("profiles")
-}
-
-// Provider Model
-model Provider {
-  id           String       @id @default(cuid())
-  userId       String       @unique
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  businessName String
-  providerType ProviderType
-  category     String
-  area         String
-  address      String
-  panNumber    String
-  aadhaarNumber String
-  gstNumber    String?
-  bankAccount  String?
-  upiId        String?
-  
-  isVerified   Boolean      @default(false)
-  isActive     Boolean      @default(true)
-  rating       Float        @default(0)
-  totalOrders  Int          @default(0)
-  isOnline     Boolean      @default(false)
-  
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  
-  // Services offered by provider
-  services     Service[]
-  
-  // Orders are handled through the User model
-  
-  // Reviews received
-  reviews      Review[]     @relation("ProviderReviews")
-
-  // Locations
-  locations    ProviderLocation[]
-
-  @@map("providers")
-}
-
-// Service Model
-model Service {
-  id          String   @id @default(cuid())
-  providerId  String
-  provider    Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
-  
-  name        String
-  description String
-  category    String
-  price       Float
-  basePrice   Float?
-  offerPercent Int?        @default(0)
-  estimatedTime Int?       // minutes
-  warrantyMonths Int?      // months
-  duration    Int      // in minutes
-  isActive    Boolean  @default(true)
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  // Orders for this service
-  orders      Order[]
-
-  @@map("services")
-}
-
-// Wallet Model
-model Wallet {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  balance   Float    @default(0)
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  // Transactions
-  transactions Transaction[]
-
-  @@map("wallets")
-}
-
-// Transaction Model
-model Transaction {
-  id            String          @id @default(cuid())
-  walletId      String
-  wallet        Wallet          @relation(fields: [walletId], references: [id], onDelete: Cascade)
-  
-  amount        Float
-  type          TransactionType
-  description   String
-  paymentMethod PaymentMethod?
-  orderId       String?
-  
-  createdAt     DateTime        @default(now())
-
-  @@map("transactions")
-}
-
-// Order Model
-model Order {
-  id          String      @id @default(cuid())
-  customerId  String
-  customer    User        @relation("CustomerOrders", fields: [customerId], references: [id])
-  providerId  String
-  provider    User        @relation("ProviderOrders", fields: [providerId], references: [id])
-  serviceId   String
-  service     Service     @relation(fields: [serviceId], references: [id])
-  
-  status      OrderStatus @default(PENDING)
-  totalAmount Float
-  commission  Float       @default(0)
-  
-  // Order details
-  serviceDate DateTime
-  address     String
-  notes       String?
-  
-  // Cancellation
-  cancelledBy String?
-  cancelReason String?
-  cancelledAt DateTime?
-  
-  // Completion
-  completedAt DateTime?
-  
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  
-  // Reviews
-  review      Review?
-  
-  // Call Sessions
-  callSessions CallSession[]
-
-  // Virtual number assignment
-  virtualAssignment VirtualAssignment?
-
-  @@map("orders")
-}
-// Virtual Number Pool for masked calling
-model VirtualNumber {
-  id          String   @id @default(cuid())
-  phoneNumber String   @unique
-  isAssigned  Boolean  @default(false)
-
-  assignments VirtualAssignment[]
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@map("virtual_numbers")
-}
-
-// Assignment of a virtual number to an order
-model VirtualAssignment {
-  id               String         @id @default(cuid())
-  orderId          String         @unique
-  order            Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  virtualNumberId  String
-  virtualNumber    VirtualNumber  @relation(fields: [virtualNumberId], references: [id], onDelete: Cascade)
-  status           String         @default("ASSIGNED") // ASSIGNED, RELEASED
-  assignedAt       DateTime       @default(now())
-  releasedAt       DateTime?
-
-  @@map("virtual_assignments")
-}
-
-// Review Model
-model Review {
-  id        String   @id @default(cuid())
-  orderId   String   @unique
-  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  
-  reviewerId String
-  reviewer   User    @relation("Reviewer", fields: [reviewerId], references: [id])
-  
-  revieweeId String
-  reviewee   User    @relation("Reviewee", fields: [revieweeId], references: [id])
-  
-  providerId String?
-  provider   Provider? @relation("ProviderReviews", fields: [providerId], references: [id])
-  
-  rating    Int
-  comment   String?
-  
-  createdAt DateTime @default(now())
-
-  @@map("reviews")
-}
-
-// OTP Model
-model OTP {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  code      String
-  type      String   // "SMS" or "EMAIL"
-  isUsed    Boolean  @default(false)
-  expiresAt DateTime
-  
-  createdAt DateTime @default(now())
-
-  @@map("otps")
-}
-
-// Message Model (for chat)
-model Message {
-  id        String   @id @default(cuid())
-  senderId  String
-  sender    User     @relation("Sender", fields: [senderId], references: [id])
-  receiverId String
-  receiver  User     @relation("Receiver", fields: [receiverId], references: [id])
-  
-  content   String
-  orderId   String?
-  
-  createdAt DateTime @default(now())
-
-  @@map("messages")
-}
-
-// Support Ticket Model
-model Ticket {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation("UserTickets", fields: [userId], references: [id])
-  
-  subject   String
-  description String
-  status    String   @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, CLOSED
-  priority  String   @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("tickets")
-}
-
-// Payment Order Model
-model PaymentOrder {
-  id            String   @id @default(cuid())
-  userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  orderId       String   @unique
-  paymentId     String?
-  amount        Float
-  currency      String   @default("INR")
-  paymentMethod String
-  status        String   @default("PENDING") // PENDING, COMPLETED, FAILED, CANCELLED
-  type          String   // WALLET_TOPUP, SERVICE_BOOKING
-  signature     String?
-  metadata      Json?
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  @@map("payment_orders")
-}
-
-// Call Session Model
-model CallSession {
-  id            String   @id @default(cuid())
-  customerId    String
-  customer      User     @relation("CustomerCalls", fields: [customerId], references: [id])
-  providerId    String
-  provider      User     @relation("ProviderCalls", fields: [providerId], references: [id])
-  orderId       String?
-  order         Order?   @relation(fields: [orderId], references: [id])
-  
-  twilioCallSid String?
-  customerPhone String
-  providerPhone String
-  status        String   @default("INITIATED") // INITIATED, RINGING, ANSWERED, COMPLETED, FAILED, NO-ANSWER
-  duration      Int?     // in seconds
-  startedAt     DateTime?
-  endedAt       DateTime?
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
-  // Call logs
-  callLogs      CallLog[]
-
-  @@map("call_sessions")
-}
-
-// Call Log Model
-model CallLog {
-  id            String      @id @default(cuid())
-  callSessionId String
-  callSession   CallSession @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
-  
-  status        String
-  duration      Int?
-  timestamp     DateTime    @default(now())
-
-  @@map("call_logs")
-}
-
-// Notification Model
-model Notification {
-  id        String    @id @default(cuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  title     String
-  body      String
-  data      Json?
-  type      String    // PUSH, EMAIL, SMS, ORDER, MESSAGE, SYSTEM
-  status    String    @default("SENT") // SENT, DELIVERED, READ, FAILED
-  readAt    DateTime?
-  
-  createdAt DateTime  @default(now())
-
-  @@map("notifications")
-}
-
-// FCM / push notification tokens per device
-model NotificationToken {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token     String   @unique
-  platform  String?
-  createdAt DateTime @default(now())
-
-  @@map("notification_tokens")
-}
-
-// Notification Preferences Model
-model NotificationPreferences {
-  id            String   @id @default(cuid())
-  userId        String   @unique
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  pushEnabled   Boolean  @default(true)
-  emailEnabled  Boolean  @default(true)
-  smsEnabled    Boolean  @default(true)
-  orderUpdates  Boolean  @default(true)
-  messages      Boolean  @default(true)
-  promotions    Boolean  @default(false)
-  systemAlerts  Boolean  @default(true)
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  @@map("notification_preferences")
-}
-
-// Admin Action Model
-model AdminAction {
-  id        String   @id @default(cuid())
-  adminId   String
-  admin     User     @relation("AdminActions", fields: [adminId], references: [id])
-  
-  action    String   // BLOCK_USER, UNBLOCK_USER, CANCEL_ORDER, etc.
-  targetId  String   // ID of the target (user, order, etc.)
-  details   Json?    // Additional details about the action
-  
-  createdAt DateTime @default(now())
-
-  @@map("admin_actions")
-}
-
-// FAQ Model
-model FAQ {
-  id       String @id @default(cuid())
-  question String
-  answer   String
-  category String
-  order    Int    @default(0)
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("faqs")
-}
-
-// Report Schedule Model
-model ReportSchedule {
-  id        String   @id @default(cuid())
-  adminId   String
-  admin     User     @relation("ReportSchedules", fields: [adminId], references: [id])
-  
-  reportType String  // user_analytics, order_analytics, financial_report, support_analytics, comprehensive
-  frequency  String  // daily, weekly, monthly
-  email      String
-  isActive   Boolean @default(true)
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("report_schedules")
-}
-
-// Geo Zone covering parts of Tirunelveli
-model Zone {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  city      String
-  polygon   Json     // Array of [lng,lat] pairs
-  isActive  Boolean  @default(true)
-
-  providerLocations ProviderLocation[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("zones")
-  @@index([isActive])
-}
-
-// Provider live or typical service location
-model ProviderLocation {
-  id         String   @id @default(cuid())
-  providerId String
-  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
-  lat        Float
-  lng        Float
-  address    String?
-  zoneId     String?
-  zone       Zone?    @relation(fields: [zoneId], references: [id])
-
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  @@map("provider_locations")
-  @@index([providerId])
-  @@index([zoneId])
-  @@index([lat, lng])
+  @@index([user_id])
+  @@index([expires_at])
 }

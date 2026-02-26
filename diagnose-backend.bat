@@ -25,17 +25,10 @@ if %errorlevel% neq 0 (
     echo PostgreSQL is running on port 5432
 )
 
-REM Create environment file
-echo Creating environment file...
-echo NODE_ENV=development > .env
-echo DATABASE_URL="postgresql://MOHAMMED RUWAIH:RUWAITH123@localhost:5432/servoley_db" >> .env
-echo JWT_SECRET="your-super-secret-jwt-key-786786" >> .env
-echo JWT_EXPIRES_IN="7d" >> .env
-echo OTP_EXPIRES_IN="300" >> .env
-echo OTP_LENGTH="6" >> .env
-echo BYPASS_OTP=true >> .env
-echo PORT=8080 >> .env
-echo Environment file created
+REM Do not overwrite .env
+if not exist .env (
+    echo WARNING: .env file not found. Database tests may fail without DATABASE_URL.
+)
 
 REM Test database connection
 echo Testing database connection...

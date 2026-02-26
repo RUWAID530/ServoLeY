@@ -1,11 +1,34 @@
-const jwt = require('jsonwebtoken');
 const { prisma } = require('../config/database');
+const { verifyAccessToken } = require('../utils/jwt');
 
-// Verify JWT token
+const loadUser = async (userId) => {
+  const user = await prisma.users.findUnique({
+    where: { id: userId },
+    include: {
+      profiles: true,
+      providers: true,
+      wallets: true,
+      notification_preferences: true
+    }
+  });
+
+  if (!user) return null;
+  if (user.deletedAt) return null;
+  if (!user.isActive || user.isBlocked) return null;
+
+  return {
+    ...user,
+    profile: user.profiles || null,
+    provider: user.providers || null,
+    wallet: user.wallets || null,
+    notificationPreferences: user.notification_preferences || null
+  };
+};
+
 const authenticateToken = async (req, res, next) => {
   try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
 
     if (!token) {
       return res.status(401).json({
@@ -14,65 +37,41 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // Get user from database
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      include: {
-        profile: true,
-        provider: true,
-        wallet: true
-      }
-    });
+    const decoded = verifyAccessToken(token);
+    const user = await loadUser(decoded.userId);
 
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: 'User not found'
+        message: 'Authentication failed'
       });
     }
 
-    if (!user.isActive) {
+    // Check token version to enforce logout invalidation
+    if (decoded.tokenVersion !== user.tokenVersion) {
       return res.status(401).json({
         success: false,
-        message: 'Account is deactivated'
-      });
-    }
-
-    if (user.isBlocked) {
-      return res.status(401).json({
-        success: false,
-        message: 'Account is blocked'
+        message: 'Token has been revoked'
       });
     }
 
     req.user = user;
-    next();
+    return next();
   } catch (error) {
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid token'
-      });
-    }
-    
-    if (error.name === 'TokenExpiredError') {
+    if (error?.name === 'TokenExpiredError') {
       return res.status(401).json({
         success: false,
         message: 'Token expired'
       });
     }
 
-    console.error('Auth middleware error:', error);
-    res.status(500).json({
+    return res.status(401).json({
       success: false,
-      message: 'Authentication error'
+      message: 'Invalid token'
     });
   }
 };
 
-// Check user role
 const requireRole = (...roles) => {
   return (req, res, next) => {
     if (!req.user) {
@@ -89,38 +88,36 @@ const requireRole = (...roles) => {
       });
     }
 
-    next();
+    return next();
   };
 };
 
-// Check if user is verified
 const requireVerification = (req, res, next) => {
-  if (!req.user.isVerified) {
+  if (!req.user?.isVerified) {
     return res.status(403).json({
       success: false,
       message: 'Account verification required'
     });
   }
-  next();
+  return next();
 };
 
-// Check if provider is verified
 const requireProviderVerification = (req, res, next) => {
-  if (req.user.userType !== 'PROVIDER') {
+  if (req.user?.userType !== 'PROVIDER') {
     return res.status(403).json({
       success: false,
       message: 'Provider access required'
     });
   }
 
-  if (!req.user.provider?.isVerified) {
+  if (!req.user?.provider?.isVerified) {
     return res.status(403).json({
       success: false,
       message: 'Provider verification required'
     });
   }
 
-  next();
+  return next();
 };
 
 module.exports = {
@@ -129,5 +126,3 @@ module.exports = {
   requireVerification,
   requireProviderVerification
 };
-
-

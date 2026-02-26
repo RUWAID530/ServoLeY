@@ -1,0 +1,327 @@
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { useProfessionalProvider } from '../contexts/ProfessionalProviderContext';
+
+// Define types based on component usage
+interface Transaction {
+  id: string;
+  description: string;
+  amount: number;
+  fees: number;
+  status: 'completed' | 'pending' | 'failed';
+  created_at: string;
+}
+
+interface Payout {
+  id: string;
+  payout_id: string;
+  amount: number;
+  destination: string;
+  status: 'paid' | 'failed';
+  payout_date: string;
+}
+
+interface PaymentMethod {
+  id: string;
+  type: 'bank' | 'card' | 'upi';
+  last4: string;
+  name: string;
+  isDefault: boolean;
+}
+
+export default function ProviderWallet() {
+  const { state } = useProfessionalProvider();
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [payouts, setPayouts] = useState<Payout[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [balance, setBalance] = useState<number>(0);
+  const [loading, setLoading] = useState(true);
+  const [showAddMethod, setShowAddMethod] = useState(false);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('token') || localStorage.getItem('accessToken');
+
+      if (!token) {
+        console.error('No authentication token found');
+        return;
+      }
+
+      // Fetch wallet data from API
+      const response = await fetch('http://localhost:8086/api/provider/wallet', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setTransactions(data.data.transactions || []);
+        setPayouts(data.data.payouts || []);
+        setBalance(data.data.balance || 0);
+        setPaymentMethods(data.data.paymentMethods || []);
+      }
+    } catch (error) {
+      console.error('Error loading wallet data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addPaymentMethod = async (methodData: Omit<PaymentMethod, 'id'>) => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('accessToken');
+
+      const response = await fetch('http://localhost:8086/api/provider/payment-methods', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(methodData)
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setPaymentMethods([...paymentMethods, { ...data.data, id: Date.now().toString() }]);
+        setShowAddMethod(false);
+      }
+    } catch (error) {
+      console.error('Error adding payment method:', error);
+    }
+  };
+
+  const removePaymentMethod = async (id: string) => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('accessToken');
+
+      const response = await fetch(`http://localhost:8086/api/provider/payment-methods/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setPaymentMethods(paymentMethods.filter(method => method.id !== id));
+      }
+    } catch (error) {
+      console.error('Error removing payment method:', error);
+    }
+  };
+
+  const setDefaultPaymentMethod = async (id: string) => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('accessToken');
+
+      const response = await fetch(`http://localhost:8086/api/provider/payment-methods/${id}/default`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setPaymentMethods(paymentMethods.map(method =>
+          method.id === id ? { ...method, isDefault: true } : { ...method, isDefault: false }
+        ));
+      }
+    } catch (error) {
+      console.error('Error setting default payment method:', error);
+    }
+  };
+
+  const availableToWithdraw = balance;
+  const pending = 0.0;
+  const totalEarned = transactions.reduce((sum, t) => sum + (t.amount > 0 ? t.amount : 0), 0);
+
+  const formatDate = (date: string) => {
+    const d = new Date(date);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="container mx-auto px-4 py-8">
+      <h1 className="text-3xl font-bold text-gray-800 mb-8">Wallet</h1>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="text-sm text-gray-500 mb-2">Available Balance</div>
+          <div className="text-2xl font-bold text-indigo-600">${availableToWithdraw.toFixed(2)}</div>
+          <Link to="/provider/withdraw" className="mt-4 inline-block bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 transition">
+            Withdraw
+          </Link>
+        </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="text-sm text-gray-500 mb-2">Pending</div>
+          <div className="text-2xl font-bold text-yellow-600">${pending.toFixed(2)}</div>
+          <div className="text-xs text-gray-500 mt-2">Processing payments</div>
+        </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="text-sm text-gray-500 mb-2">Total Earned</div>
+          <div className="text-2xl font-bold text-green-600">${totalEarned.toFixed(2)}</div>
+          <div className="text-xs text-gray-500 mt-2">All time earnings</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="bg-white rounded-lg shadow">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="text-lg font-medium text-gray-900">Recent Transactions</h2>
+          </div>
+          <div className="p-6">
+            {transactions.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                No transactions yet
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {transactions.slice(0, 5).map(transaction => (
+                  <div key={transaction.id} className="flex items-center justify-between">
+                    <div>
+                      <div className="font-medium">{transaction.description}</div>
+                      <div className="text-sm text-gray-500">{formatDate(transaction.created_at)}</div>
+                    </div>
+                    <div className={`font-medium ${transaction.amount > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {transaction.amount > 0 ? '+' : ''}${transaction.amount.toFixed(2)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="text-lg font-medium text-gray-900">Payment Methods</h2>
+          </div>
+          <div className="p-6">
+            {paymentMethods.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                No payment methods added
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {paymentMethods.map(method => (
+                  <div key={method.id} className="flex items-center justify-between border-b pb-4">
+                    <div className="flex items-center">
+                      <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center mr-3">
+                        {method.type === 'bank' ? '🏦' : method.type === 'card' ? '💳' : '📱'}
+                      </div>
+                      <div>
+                        <div className="font-medium">{method.name}</div>
+                        <div className="text-sm text-gray-500">
+                          {method.type === 'bank' ? `Account ending in ${method.last4}` : 
+                           method.type === 'card' ? `Card ending in ${method.last4}` : 
+                           `UPI ID ending in ${method.last4}`}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center">
+                      {method.isDefault && (
+                        <span className="bg-indigo-100 text-indigo-800 text-xs px-2 py-1 rounded mr-2">Default</span>
+                      )}
+                      <button
+                        onClick={() => setDefaultPaymentMethod(method.id)}
+                        className="text-indigo-600 hover:text-indigo-800 mr-3"
+                      >
+                        Set as default
+                      </button>
+                      <button
+                        onClick={() => removePaymentMethod(method.id)}
+                        className="text-red-600 hover:text-red-800"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={() => setShowAddMethod(true)}
+              className="mt-4 w-full bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 transition"
+            >
+              Add Payment Method
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {showAddMethod && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-medium mb-4">Add Payment Method</h3>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.currentTarget);
+              addPaymentMethod({
+                type: formData.get('type') as 'bank' | 'card' | 'upi',
+                name: formData.get('name') as string,
+                last4: formData.get('last4') as string,
+                isDefault: false
+              });
+            }}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                <select name="type" className="w-full border border-gray-300 rounded-md px-3 py-2">
+                  <option value="bank">Bank Account</option>
+                  <option value="card">Credit/Debit Card</option>
+                  <option value="upi">UPI</option>
+                </select>
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input name="name" type="text" className="w-full border border-gray-300 rounded-md px-3 py-2" required />
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Last 4 Digits</label>
+                <input name="last4" type="text" maxLength={4} className="w-full border border-gray-300 rounded-md px-3 py-2" required />
+              </div>
+              <div className="flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddMethod(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+                >
+                  Add
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

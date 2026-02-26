@@ -3,8 +3,64 @@ const { body, validationResult } = require('express-validator');
 const { prisma } = require('../config/database');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const { sendNotification } = require('../utils/notifications');
+const { randomUUID } = require('crypto');
 
 const router = express.Router();
+const ALLOWED_TICKET_SORT_FIELDS = ['createdAt', 'updatedAt', 'status', 'priority'];
+const ALLOWED_SORT_ORDERS = ['asc', 'desc'];
+const TICKET_STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
+const TICKET_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'];
+
+const buildTicketTimeline = (ticket, actions = []) => {
+  const baseEvent = {
+    id: `created-${ticket.id}`,
+    type: 'CREATED',
+    title: 'Ticket created',
+    message: 'Ticket submitted and added to admin support queue.',
+    createdAt: ticket.createdAt,
+    actor: {
+      id: ticket.userId,
+      name: 'Customer',
+      role: 'CUSTOMER'
+    }
+  };
+
+  const actionEvents = actions.map((action) => {
+    const details = action.details || {};
+    const actorName = [
+      action.users?.profiles?.firstName,
+      action.users?.profiles?.lastName
+    ].filter(Boolean).join(' ') || action.users?.email || 'Support Team';
+
+    const changeLines = [];
+    if (details?.changes?.status) {
+      changeLines.push(`Status: ${details.changes.status.from} -> ${details.changes.status.to}`);
+    }
+    if (details?.changes?.priority) {
+      changeLines.push(`Priority: ${details.changes.priority.from} -> ${details.changes.priority.to}`);
+    }
+    if (details?.note) {
+      changeLines.push(`Note: ${String(details.note).trim()}`);
+    }
+
+    return {
+      id: action.id,
+      type: 'UPDATE',
+      title: 'Support update',
+      message: changeLines.join(' | ') || 'Ticket updated by support team.',
+      createdAt: action.createdAt,
+      actor: {
+        id: action.adminId,
+        name: actorName,
+        role: details?.actorRole || 'ADMIN'
+      }
+    };
+  });
+
+  return [baseEvent, ...actionEvents].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+};
 
 // ==================== SUPPORT TICKETS ====================
 
@@ -13,7 +69,10 @@ router.post('/tickets', [
   authenticateToken,
   body('subject').notEmpty().withMessage('Subject is required'),
   body('description').notEmpty().withMessage('Description is required'),
-  body('priority').optional().isIn(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).withMessage('Invalid priority')
+  body('priority')
+    .optional()
+    .custom((value) => TICKET_PRIORITIES.includes(String(value).toUpperCase()))
+    .withMessage('Invalid priority')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -25,31 +84,41 @@ router.post('/tickets', [
       });
     }
 
-    const { subject, description, priority = 'MEDIUM' } = req.body;
+    const now = new Date();
+    const subject = String(req.body.subject || '').trim();
+    const description = String(req.body.description || '').trim();
+    const priority = String(req.body.priority || 'MEDIUM').toUpperCase();
 
-    const ticket = await prisma.ticket.create({
+    const ticket = await prisma.tickets.create({
       data: {
+        id: randomUUID(),
         userId: req.user.id,
         subject,
         description,
-        priority
+        priority,
+        updatedAt: now
       }
     });
 
     // Notify admin about new ticket
-    const admins = await prisma.user.findMany({
+    const admins = await prisma.users.findMany({
       where: { userType: 'ADMIN' }
     });
 
     for (const admin of admins) {
-      await sendNotification({
-        userId: admin.id,
-        type: 'SUPPORT',
-        title: 'New Support Ticket',
-        body: `New ticket from ${req.user.profile?.firstName || 'User'}: ${subject}`,
-        data: { ticketId: ticket.id },
-        channels: ['PUSH', 'EMAIL']
-      });
+      try {
+        await sendNotification({
+          userId: admin.id,
+          type: 'SUPPORT',
+          title: 'New Support Ticket',
+          body: `New ticket from ${req.user.profile?.firstName || 'User'}: ${subject}`,
+          data: { ticketId: ticket.id },
+          channels: ['PUSH', 'EMAIL']
+        });
+      } catch (notificationError) {
+        // Ticket creation should not fail because notifications fail.
+        console.error('Admin notification failed for support ticket:', notificationError);
+      }
     }
 
     res.status(201).json({
@@ -70,21 +139,24 @@ router.post('/tickets', [
 // Get user tickets
 router.get('/tickets', authenticateToken, async (req, res) => {
   try {
-    const { page = 1, limit = 10, status, priority } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.max(parseInt(req.query.limit, 10) || 10, 1);
+    const skip = (page - 1) * limit;
+    const status = req.query.status ? String(req.query.status).toUpperCase() : undefined;
+    const priority = req.query.priority ? String(req.query.priority).toUpperCase() : undefined;
 
     const whereClause = { userId: req.user.id };
     if (status) whereClause.status = status;
     if (priority) whereClause.priority = priority;
 
-    const tickets = await prisma.ticket.findMany({
+    const tickets = await prisma.tickets.findMany({
       where: whereClause,
       orderBy: { createdAt: 'desc' },
       skip,
-      take: parseInt(limit)
+      take: limit
     });
 
-    const total = await prisma.ticket.count({
+    const total = await prisma.tickets.count({
       where: whereClause
     });
 
@@ -93,10 +165,10 @@ router.get('/tickets', authenticateToken, async (req, res) => {
       data: {
         tickets,
         pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
+          page,
+          limit,
           total,
-          pages: Math.ceil(total / parseInt(limit))
+          pages: Math.ceil(total / limit)
         }
       }
     });
@@ -115,18 +187,16 @@ router.get('/tickets/:ticketId', authenticateToken, async (req, res) => {
   try {
     const { ticketId } = req.params;
 
-    const ticket = await prisma.ticket.findFirst({
-      where: {
-        id: ticketId,
-        OR: [
-          { userId: req.user.id },
-          { ...(req.user.userType === 'ADMIN' && {}) }
-        ]
-      },
+    const whereClause = req.user.userType === 'ADMIN'
+      ? { id: ticketId }
+      : { id: ticketId, userId: req.user.id };
+
+    const ticket = await prisma.tickets.findFirst({
+      where: whereClause,
       include: {
-        user: {
+        users: {
           include: {
-            profile: true
+            profiles: true
           }
         }
       }
@@ -156,7 +226,9 @@ router.get('/tickets/:ticketId', authenticateToken, async (req, res) => {
 // Update ticket status (User)
 router.put('/tickets/:ticketId/status', [
   authenticateToken,
-  body('status').isIn(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED']).withMessage('Invalid status')
+  body('status')
+    .custom((value) => ['OPEN', 'CLOSED'].includes(String(value).toUpperCase()))
+    .withMessage('Invalid status. Customer can only OPEN (reopen) or CLOSE a ticket.')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -169,9 +241,9 @@ router.put('/tickets/:ticketId/status', [
     }
 
     const { ticketId } = req.params;
-    const { status } = req.body;
+    const status = String(req.body.status).toUpperCase();
 
-    const ticket = await prisma.ticket.findFirst({
+    const ticket = await prisma.tickets.findFirst({
       where: {
         id: ticketId,
         userId: req.user.id
@@ -185,9 +257,34 @@ router.put('/tickets/:ticketId/status', [
       });
     }
 
-    const updatedTicket = await prisma.ticket.update({
+    if (ticket.status === status) {
+      return res.json({
+        success: true,
+        message: 'Ticket already in requested status',
+        data: { ticket }
+      });
+    }
+
+    if (status === 'OPEN' && ticket.status !== 'CLOSED') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only CLOSED tickets can be reopened by customer'
+      });
+    }
+
+    if (status === 'CLOSED' && ticket.status === 'CLOSED') {
+      return res.status(400).json({
+        success: false,
+        message: 'Ticket is already CLOSED'
+      });
+    }
+
+    const updatedTicket = await prisma.tickets.update({
       where: { id: ticketId },
-      data: { status }
+      data: {
+        status,
+        updatedAt: new Date()
+      }
     });
 
     res.json({
@@ -205,24 +302,75 @@ router.put('/tickets/:ticketId/status', [
   }
 });
 
+// Get ticket timeline
+router.get('/tickets/:ticketId/timeline', authenticateToken, async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+
+    const whereClause = req.user.userType === 'ADMIN'
+      ? { id: ticketId }
+      : { id: ticketId, userId: req.user.id };
+
+    const ticket = await prisma.tickets.findFirst({
+      where: whereClause
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: 'Ticket not found or unauthorized'
+      });
+    }
+
+    const actions = await prisma.admin_actions.findMany({
+      where: {
+        targetId: ticket.id,
+        action: 'SUPPORT_TICKET_UPDATED'
+      },
+      include: {
+        users: {
+          include: {
+            profiles: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    const timeline = buildTicketTimeline(ticket, actions);
+
+    res.json({
+      success: true,
+      data: { timeline }
+    });
+  } catch (error) {
+    console.error('Get ticket timeline error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get ticket timeline'
+    });
+  }
+});
+
 // ==================== ADMIN SUPPORT MANAGEMENT ====================
 
 // Get all tickets (Admin)
 router.get('/admin/tickets', authenticateToken, requireRole('ADMIN'), async (req, res) => {
   try {
-    const { 
-      page = 1, 
-      limit = 20, 
-      status, 
-      priority, 
-      userId,
-      startDate,
-      endDate,
-      sortBy = 'createdAt',
-      sortOrder = 'desc'
-    } = req.query;
-    
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.max(parseInt(req.query.limit, 10) || 20, 1);
+    const skip = (page - 1) * limit;
+    const status = req.query.status ? String(req.query.status).toUpperCase() : undefined;
+    const priority = req.query.priority ? String(req.query.priority).toUpperCase() : undefined;
+    const userId = req.query.userId ? String(req.query.userId) : undefined;
+    const startDate = req.query.startDate;
+    const endDate = req.query.endDate;
+    const sortBy = ALLOWED_TICKET_SORT_FIELDS.includes(String(req.query.sortBy))
+      ? String(req.query.sortBy)
+      : 'createdAt';
+    const sortOrder = ALLOWED_SORT_ORDERS.includes(String(req.query.sortOrder).toLowerCase())
+      ? String(req.query.sortOrder).toLowerCase()
+      : 'desc';
 
     const whereClause = {};
     if (status) whereClause.status = status;
@@ -235,21 +383,21 @@ router.get('/admin/tickets', authenticateToken, requireRole('ADMIN'), async (req
       };
     }
 
-    const tickets = await prisma.ticket.findMany({
+    const tickets = await prisma.tickets.findMany({
       where: whereClause,
       include: {
-        user: {
+        users: {
           include: {
-            profile: true
+            profiles: true
           }
         }
       },
       orderBy: { [sortBy]: sortOrder },
       skip,
-      take: parseInt(limit)
+      take: limit
     });
 
-    const total = await prisma.ticket.count({
+    const total = await prisma.tickets.count({
       where: whereClause
     });
 
@@ -258,10 +406,10 @@ router.get('/admin/tickets', authenticateToken, requireRole('ADMIN'), async (req
       data: {
         tickets,
         pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
+          page,
+          limit,
           total,
-          pages: Math.ceil(total / parseInt(limit))
+          pages: Math.ceil(total / limit)
         }
       }
     });
@@ -279,9 +427,19 @@ router.get('/admin/tickets', authenticateToken, requireRole('ADMIN'), async (req
 router.put('/admin/tickets/:ticketId', [
   authenticateToken,
   requireRole('ADMIN'),
-  body('status').optional().isIn(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED']).withMessage('Invalid status'),
-  body('priority').optional().isIn(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).withMessage('Invalid priority'),
-  body('response').optional().isString().withMessage('Response must be a string')
+  body('status')
+    .optional()
+    .custom((value) => TICKET_STATUSES.includes(String(value).toUpperCase()))
+    .withMessage('Invalid status'),
+  body('priority')
+    .optional()
+    .custom((value) => TICKET_PRIORITIES.includes(String(value).toUpperCase()))
+    .withMessage('Invalid priority'),
+  body('note')
+    .optional()
+    .isString()
+    .isLength({ max: 1000 })
+    .withMessage('Note should be a text up to 1000 characters')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -294,12 +452,14 @@ router.put('/admin/tickets/:ticketId', [
     }
 
     const { ticketId } = req.params;
-    const { status, priority, response } = req.body;
+    const status = req.body.status ? String(req.body.status).toUpperCase() : undefined;
+    const priority = req.body.priority ? String(req.body.priority).toUpperCase() : undefined;
+    const note = req.body.note ? String(req.body.note).trim() : '';
 
-    const ticket = await prisma.ticket.findUnique({
+    const ticket = await prisma.tickets.findUnique({
       where: { id: ticketId },
       include: {
-        user: true
+        users: true
       }
     });
 
@@ -310,26 +470,63 @@ router.put('/admin/tickets/:ticketId', [
       });
     }
 
-    const updateData = {};
+    if (!status && !priority && !note) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one of status, priority, or note is required'
+      });
+    }
+
+    const updateData = { updatedAt: new Date() };
     if (status) updateData.status = status;
     if (priority) updateData.priority = priority;
-    if (response) updateData.response = response;
 
-    const updatedTicket = await prisma.ticket.update({
-      where: { id: ticketId },
-      data: updateData
+    const updatedTicket = status || priority
+      ? await prisma.tickets.update({
+        where: { id: ticketId },
+        data: updateData
+      })
+      : ticket;
+
+    const changes = {};
+    if (status && status !== ticket.status) {
+      changes.status = { from: ticket.status, to: status };
+    }
+    if (priority && priority !== ticket.priority) {
+      changes.priority = { from: ticket.priority, to: priority };
+    }
+
+    await prisma.admin_actions.create({
+      data: {
+        id: randomUUID(),
+        adminId: req.user.id,
+        action: 'SUPPORT_TICKET_UPDATED',
+        targetId: ticket.id,
+        details: {
+          source: 'SUPPORT_QUEUE',
+          ticketId: ticket.id,
+          changes,
+          note: note || null,
+          actorRole: req.user.userType || 'ADMIN'
+        }
+      }
     });
 
     // Notify user about ticket update
-    if (status && status !== ticket.status) {
-      await sendNotification({
-        userId: ticket.userId,
-        type: 'SUPPORT',
-        title: 'Support Ticket Updated',
-        body: `Your ticket "${ticket.subject}" has been updated to ${status}`,
-        data: { ticketId: ticket.id, status },
-        channels: ['PUSH', 'EMAIL']
-      });
+    if ((status && status !== ticket.status) || note) {
+      try {
+        const noteSuffix = note ? ` | Note: ${note.slice(0, 120)}` : '';
+        await sendNotification({
+          userId: ticket.userId,
+          type: 'SUPPORT',
+          title: 'Support Ticket Updated',
+          body: `Your ticket "${ticket.subject}" has an update.${status ? ` Status: ${status}.` : ''}${noteSuffix}`,
+          data: { ticketId: ticket.id, status },
+          channels: ['PUSH', 'EMAIL']
+        });
+      } catch (notificationError) {
+        console.error('User notification failed for support update:', notificationError);
+      }
     }
 
     res.json({
@@ -361,24 +558,24 @@ router.get('/admin/statistics', authenticateToken, requireRole('ADMIN'), async (
     }
 
     // Get ticket statistics
-    const totalTickets = await prisma.ticket.count({
+    const totalTickets = await prisma.tickets.count({
       where: whereClause
     });
 
-    const statusBreakdown = await prisma.ticket.groupBy({
+    const statusBreakdown = await prisma.tickets.groupBy({
       by: ['status'],
       where: whereClause,
       _count: { status: true }
     });
 
-    const priorityBreakdown = await prisma.ticket.groupBy({
+    const priorityBreakdown = await prisma.tickets.groupBy({
       by: ['priority'],
       where: whereClause,
       _count: { priority: true }
     });
 
     // Get average resolution time
-    const resolvedTickets = await prisma.ticket.findMany({
+    const resolvedTickets = await prisma.tickets.findMany({
       where: {
         status: 'RESOLVED',
         ...whereClause
@@ -397,12 +594,12 @@ router.get('/admin/statistics', authenticateToken, requireRole('ADMIN'), async (
       resolutionTimes.reduce((sum, time) => sum + time, 0) / resolutionTimes.length : 0;
 
     // Get recent tickets
-    const recentTickets = await prisma.ticket.findMany({
+    const recentTickets = await prisma.tickets.findMany({
       where: whereClause,
       include: {
-        user: {
+        users: {
           include: {
-            profile: true
+            profiles: true
           }
         }
       },
@@ -438,7 +635,7 @@ router.get('/admin/statistics', authenticateToken, requireRole('ADMIN'), async (
 // Get FAQ categories
 router.get('/faq/categories', async (req, res) => {
   try {
-    const categories = await prisma.fAQ.findMany({
+    const categories = await prisma.faqs.findMany({
       select: { category: true },
       distinct: ['category']
     });
@@ -473,7 +670,7 @@ router.get('/faq', async (req, res) => {
       ];
     }
 
-    const faqs = await prisma.fAQ.findMany({
+    const faqs = await prisma.faqs.findMany({
       where: whereClause,
       orderBy: { order: 'asc' }
     });
@@ -511,14 +708,17 @@ router.post('/admin/faq', [
       });
     }
 
+    const now = new Date();
     const { question, answer, category, order = 0 } = req.body;
 
-    const faq = await prisma.fAQ.create({
+    const faq = await prisma.faqs.create({
       data: {
+        id: randomUUID(),
         question,
         answer,
         category,
-        order
+        order,
+        updatedAt: now
       }
     });
 
@@ -559,7 +759,7 @@ router.put('/admin/faq/:faqId', [
     const { faqId } = req.params;
     const { question, answer, category, order } = req.body;
 
-    const faq = await prisma.fAQ.findUnique({
+    const faq = await prisma.faqs.findUnique({
       where: { id: faqId }
     });
 
@@ -570,13 +770,14 @@ router.put('/admin/faq/:faqId', [
       });
     }
 
-    const updatedFAQ = await prisma.fAQ.update({
+    const updatedFAQ = await prisma.faqs.update({
       where: { id: faqId },
       data: {
         ...(question && { question }),
         ...(answer && { answer }),
         ...(category && { category }),
-        ...(order !== undefined && { order })
+        ...(order !== undefined && { order }),
+        updatedAt: new Date()
       }
     });
 
@@ -600,7 +801,7 @@ router.delete('/admin/faq/:faqId', authenticateToken, requireRole('ADMIN'), asyn
   try {
     const { faqId } = req.params;
 
-    const faq = await prisma.fAQ.findUnique({
+    const faq = await prisma.faqs.findUnique({
       where: { id: faqId }
     });
 
@@ -611,7 +812,7 @@ router.delete('/admin/faq/:faqId', authenticateToken, requireRole('ADMIN'), asyn
       });
     }
 
-    await prisma.fAQ.delete({
+    await prisma.faqs.delete({
       where: { id: faqId }
     });
 
