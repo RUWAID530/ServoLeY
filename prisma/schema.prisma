@@ -363,6 +363,7 @@ model users {
   user_payment_methods                          user_payment_methods[]
   user_verifications                            user_verifications?
   wallets                                       wallets?
+  file_ownership                                file_ownership[]
 }
 
 model virtual_assignments {
