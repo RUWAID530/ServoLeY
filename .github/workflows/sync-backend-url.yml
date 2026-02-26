@@ -1,0 +1,55 @@
+name: Sync Backend URL
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - server.js
+      - routes/**
+      - config/**
+      - middleware/**
+      - prisma/**
+      - scripts/sync-backend-url.js
+      - .github/workflows/sync-backend-url.yml
+
+jobs:
+  sync:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Sync Render backend URL to frontend config
+        run: node scripts/sync-backend-url.js
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          RENDER_SERVICE_NAME: ${{ secrets.RENDER_SERVICE_NAME }}
+          RENDER_BACKEND_URL: ${{ secrets.RENDER_BACKEND_URL }}
+          FRONTEND_ENV_KEY: VITE_API_URL
+          FRONTEND_ENV_FILE: unified-pwa/.env.production
+          SKIP_FRONTEND_FILE_UPDATE: 'false'
+
+      - name: Commit updated frontend env file
+        run: |
+          if git diff --quiet -- unified-pwa/.env.production; then
+            echo "No backend URL change detected."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add unified-pwa/.env.production
+          git commit -m "chore(frontend): sync backend api url [skip ci]"
+          git push

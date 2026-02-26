@@ -17,6 +17,7 @@ unified-pwa/dist/
 unified-pwa/.env
 unified-pwa/.env.*
 !unified-pwa/.env.example
+!unified-pwa/.env.production
 
 # Logs
 logs/

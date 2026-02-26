@@ -15,7 +15,7 @@
     "backend": "node server.js",
     "frontend": "cd unified-pwa && npm run dev",
     "dev:admin": "cd admin-web && npm run dev",
-    
+    "sync:backend-url": "node scripts/sync-backend-url.js",
     "idx": "concurrently \"npm run start-server\" \"npm run dev:customer\""
   },
   "dependencies": {
