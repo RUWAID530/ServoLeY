@@ -20,7 +20,17 @@ export const uploadImage = (file: File) => {
     headers: {
       'Content-Type': 'multipart/form-data',
     },
-  }).then(res => ({ success: true, data: res.data }))
+  }).then(res => {
+      const payload = res.data || {};
+      const imageUrl = payload?.data?.imageUrl || payload?.data?.url || payload?.imageUrl || payload?.url || '';
+      return {
+        success: true,
+        data: {
+          ...payload,
+          url: imageUrl
+        }
+      };
+    })
     .catch(error => ({ 
       success: false, 
       message: error.message,
