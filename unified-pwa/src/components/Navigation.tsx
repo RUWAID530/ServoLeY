@@ -18,7 +18,7 @@ export default function Navigation({ active, onNavigate, onProviderRegister, onC
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-gray-800 z-50">
-      <div className="max-w-7xl mx-auto flex items-center justify-around px-4 py-3">
+      <div className="max-w-7xl mx-auto grid grid-cols-5 items-center px-2 py-2 sm:px-4 sm:py-3">
         {items.map((item) => {
           const Icon = item.icon;
           const isActive = active === item.id;
@@ -27,14 +27,14 @@ export default function Navigation({ active, onNavigate, onProviderRegister, onC
             <button
               key={item.id}
               onClick={() => onNavigate(item.id)}
-              className={`flex flex-col items-center gap-1 px-6 py-2 rounded-full transition-all ${
+              className={`flex min-w-0 flex-col items-center gap-1 rounded-lg py-2 transition-all ${
                 isActive
                   ? 'bg-purple-600 text-white shadow-lg'
-                  : 'text-gray-300 hover:bg-dark-800'
+                  : 'text-gray-300 hover:bg-slate-800'
               }`}
             >
-              <Icon className="w-5 h-5" />
-              <span className="text-xs font-medium">{item.label}</span>
+              <Icon className="h-5 w-5" />
+              <span className="truncate text-[11px] font-medium sm:text-xs">{item.label}</span>
             </button>
           );
         })}
