@@ -95,7 +95,12 @@ const normalizeUser = (rawUser: any) => {
     phone: rawUser.phone || '',
     firstName: profile.firstName || rawUser.firstName || '',
     lastName: profile.lastName || rawUser.lastName || '',
-    avatar: resolvedAvatar
+    avatar: resolvedAvatar,
+    address: profile.address || rawUser.address || '',
+    pincode: profile.pincode || rawUser.pincode || '',
+    city: profile.city || rawUser.city || '',
+    state: profile.state || rawUser.state || '',
+    country: profile.country || rawUser.country || 'India'
   };
 };
 
@@ -118,6 +123,11 @@ const persistUserProfile = (nextUser: any) => {
   localStorage.setItem('lastName', merged.lastName || '');
   localStorage.setItem('email', merged.email || '');
   localStorage.setItem('phone', merged.phone || '');
+  localStorage.setItem('address', merged.address || '');
+  localStorage.setItem('city', merged.city || '');
+  localStorage.setItem('state', merged.state || '');
+  localStorage.setItem('pincode', merged.pincode || '');
+  localStorage.setItem('country', merged.country || 'India');
 
   window.dispatchEvent(new CustomEvent('customer-profile-updated', { detail: merged }));
 };
@@ -154,7 +164,12 @@ const getStoredUser = () => {
       phone: parsed.phone || localStorage.getItem('phone') || '',
       firstName: parsed.firstName || localStorage.getItem('firstName') || '',
       lastName: parsed.lastName || localStorage.getItem('lastName') || '',
-      avatar: parsed.avatar || null
+      avatar: parsed.avatar || null,
+      address: parsed.address || localStorage.getItem('address') || '',
+      city: parsed.city || localStorage.getItem('city') || '',
+      state: parsed.state || localStorage.getItem('state') || '',
+      pincode: parsed.pincode || localStorage.getItem('pincode') || '',
+      country: parsed.country || localStorage.getItem('country') || 'India'
     };
   } catch {
     return null;
@@ -215,6 +230,7 @@ const CustomerProfile: React.FC = () => {
   const [showAddressModal, setShowAddressModal] = useState(false);
   const [editingAddress, setEditingAddress] = useState(null);
   const [addressForm, setAddressForm] = useState({ type: 'Home', address: '' });
+  const [savingAddress, setSavingAddress] = useState(false);
   const [preferences, setPreferences] = useState(DEFAULT_NOTIFICATION_PREFERENCES);
   const [preferencesLoading, setPreferencesLoading] = useState(true);
   const [savingPreferences, setSavingPreferences] = useState(false);
@@ -223,6 +239,20 @@ const CustomerProfile: React.FC = () => {
   const [securityLoading, setSecurityLoading] = useState(true);
   const [securityNotice, setSecurityNotice] = useState('');
   const [showSessionsModal, setShowSessionsModal] = useState(false);
+  const savedAddresses = React.useMemo(() => {
+    if (!userData) return [];
+
+    const primaryLine = String(userData.address || '').trim();
+    const locationLine = [userData.city, userData.state, userData.pincode]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .join(', ');
+    const country = String(userData.country || '').trim();
+    const formatted = [primaryLine, locationLine, country].filter(Boolean).join(', ');
+
+    if (!formatted) return [];
+    return [{ type: 'Primary', addr: formatted, rawAddress: primaryLine }];
+  }, [userData]);
 
   const handleNavigate = (page: 'home' | 'services' | 'wallet' | 'support' | 'profile') => {
     setActive(page);
@@ -439,7 +469,24 @@ const CustomerProfile: React.FC = () => {
 
   const handleSavePersonal = async () => {
     try {
-      console.log('Saving personal data:', personalData);
+      const firstName = String(personalData.firstName || '').trim();
+      const lastName = String(personalData.lastName || '').trim();
+      const email = String(personalData.email || '').trim();
+      const phone = String(personalData.phone || '').trim();
+
+      if (!firstName || !lastName) {
+        alert('First name and last name are required.');
+        return;
+      }
+
+      const payload: Record<string, string> = {
+        firstName,
+        lastName
+      };
+      if (email) payload.email = email;
+      if (phone) payload.phone = phone;
+
+      console.log('Saving personal data:', payload);
       
       const response = await fetchWithFallback('/api/auth/me', {
         method: 'PUT',
@@ -447,7 +494,7 @@ const CustomerProfile: React.FC = () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${getAuthToken()}`
         },
-        body: JSON.stringify(personalData)
+        body: JSON.stringify(payload)
       });
 
       const result = await parseJsonSafe(response);
@@ -462,11 +509,14 @@ const CustomerProfile: React.FC = () => {
         alert('Personal details saved successfully!');
         setEditingPersonal(false);
       } else {
-        throw new Error(result.message || 'Save failed');
+        const validationMessage = Array.isArray(result?.errors) && result.errors.length > 0
+          ? String(result.errors[0]?.msg || '')
+          : '';
+        throw new Error(validationMessage || result?.message || 'Save failed');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving personal data:', error);
-      alert('Failed to save personal details. Please try again.');
+      alert(error?.message || 'Failed to save personal details. Please try again.');
     }
   };
 
@@ -520,15 +570,43 @@ const CustomerProfile: React.FC = () => {
     }
   };
 
-  const handleEditAddress = (address) => {
+  const handleEditAddress = (address: any) => {
     setEditingAddress(address);
-    setAddressForm({ type: address.type, address: address.addr });
+    setAddressForm({ type: address.type, address: address.rawAddress || address.addr || '' });
     setShowAddressModal(true);
   };
 
-  const handleRemoveAddress = (address) => {
-    if (confirm(`Are you sure you want to remove the ${address.type} address?`)) {
+  const handleRemoveAddress = async (address: any) => {
+    const confirmed = confirm(`Are you sure you want to remove the ${address.type} address?`);
+    if (!confirmed) return;
+    try {
+      setSavingAddress(true);
+      const response = await fetchWithFallback('/api/auth/me', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getAuthToken()}`
+        },
+        body: JSON.stringify({ address: null, city: null, state: null, pincode: null })
+      });
+      const result = await parseJsonSafe(response);
+      if (!response.ok || !result?.success) {
+        const validationMessage = Array.isArray(result?.errors) && result.errors.length > 0
+          ? String(result.errors[0]?.msg || '')
+          : '';
+        throw new Error(validationMessage || result?.message || 'Failed to remove address');
+      }
+      const normalizedUser = normalizeUser(result?.data?.user);
+      if (normalizedUser) {
+        setUserData(normalizedUser);
+        persistUserProfile(normalizedUser);
+      }
       alert('Address removed successfully!');
+    } catch (error: any) {
+      console.error('Error removing address:', error);
+      alert(error?.message || 'Failed to remove address. Please try again.');
+    } finally {
+      setSavingAddress(false);
     }
   };
 
@@ -538,14 +616,47 @@ const CustomerProfile: React.FC = () => {
     setShowAddressModal(true);
   };
 
-  const handleAddressSubmit = () => {
-    if (editingAddress) {
-      alert('Address updated successfully!');
-    } else {
-      alert('New address added successfully!');
+  const handleAddressSubmit = async () => {
+    const nextAddress = String(addressForm.address || '').trim();
+    if (!nextAddress) {
+      alert('Please enter an address.');
+      return;
     }
-    setShowAddressModal(false);
-    setAddressForm({ type: 'Home', address: '' });
+
+    try {
+      setSavingAddress(true);
+      const response = await fetchWithFallback('/api/auth/me', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getAuthToken()}`
+        },
+        body: JSON.stringify({ address: nextAddress })
+      });
+      const result = await parseJsonSafe(response);
+      if (!response.ok || !result?.success) {
+        const validationMessage = Array.isArray(result?.errors) && result.errors.length > 0
+          ? String(result.errors[0]?.msg || '')
+          : '';
+        throw new Error(validationMessage || result?.message || 'Failed to update address');
+      }
+
+      const normalizedUser = normalizeUser(result?.data?.user);
+      if (normalizedUser) {
+        setUserData(normalizedUser);
+        persistUserProfile(normalizedUser);
+      }
+
+      alert(editingAddress ? 'Address updated successfully!' : 'New address added successfully!');
+      setShowAddressModal(false);
+      setAddressForm({ type: 'Home', address: '' });
+      setEditingAddress(null);
+    } catch (error: any) {
+      console.error('Error saving address:', error);
+      alert(error?.message || 'Failed to save address. Please try again.');
+    } finally {
+      setSavingAddress(false);
+    }
   };
 
   const updatePreference = (key: keyof typeof DEFAULT_NOTIFICATION_PREFERENCES, value: boolean) => {
@@ -832,10 +943,13 @@ const CustomerProfile: React.FC = () => {
         <div className="bg-slate-800 rounded-3xl p-6 border border-slate-700">
           <h2 className="text-lg font-bold text-white mb-4">Saved Addresses</h2>
           <div className="space-y-4">
-            {[
-              { type: 'Home', addr: '12, River View Apartments, Tirunelveli 627001' },
-              { type: 'Work', addr: 'B-204, Tech Park, Palayamkottai 627011' }
-            ].map((addr, idx) => (
+            {savedAddresses.length === 0 ? (
+              <div className="bg-slate-900 p-4 rounded-2xl border border-slate-700">
+                <p className="text-sm text-gray-300">No address added yet.</p>
+                <p className="text-xs text-gray-500 mt-1">Add your address to make booking and service delivery easier.</p>
+              </div>
+            ) : (
+              savedAddresses.map((addr, idx) => (
               <div key={idx} className="flex flex-col md:flex-row md:items-center justify-between bg-slate-900 p-4 rounded-2xl border border-slate-700 gap-4">
                 <div>
                   <div className="font-bold text-white mb-1">{addr.type}</div>
@@ -844,21 +958,25 @@ const CustomerProfile: React.FC = () => {
                 <div className="flex gap-2">
                   <button 
                     onClick={() => handleEditAddress(addr)}
+                    disabled={savingAddress}
                     className="px-4 py-1.5 bg-purple-600 text-white text-xs rounded-full font-medium"
                   >
                     Edit
                   </button>
                   <button 
                     onClick={() => handleRemoveAddress(addr)}
+                    disabled={savingAddress}
                     className="px-4 py-1.5 bg-pink-100 text-slate-900 text-xs rounded-full font-medium"
                   >
                     Remove
                   </button>
                 </div>
               </div>
-            ))}
+              ))
+            )}
             <button 
               onClick={handleAddAddress}
+              disabled={savingAddress}
               className="w-full md:w-auto bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-full text-sm font-medium transition-colors"
             >
               Add New Address
