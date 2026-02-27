@@ -218,7 +218,7 @@ export const StepType: React.FC<StepProps> = ({ data, updateData }) => {
       <div className="mt-6 pt-6 border-t border-gray-100">
         <label className="text-sm font-medium text-gray-700 mb-2 block">What do you primarily offer?</label>
         <div className="relative">
-          <select className="w-full p-3 bg-gray-900 text-white rounded-lg appearance-none cursor-pointer">
+          <select className="w-full p-3 bg-white border border-gray-300 text-gray-700 rounded-lg appearance-none cursor-pointer focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
              <option>e.g., Electrician, Beautician, AC repair, Pet services</option>
           </select>
           <ChevronDown className="w-5 h-5 text-gray-400 absolute right-3 top-3.5 pointer-events-none" />
@@ -329,6 +329,7 @@ export const StepServices: React.FC<StepProps> = ({ data, updateData }) => {
                     <label className="text-sm font-medium text-gray-700">Service category <span className="text-red-500">*</span></label>
                     <div className="relative">
                        <select 
+                         className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white text-gray-700 appearance-none"
                          value={data.serviceCategory || ''}
                          onChange={(e) => updateData({ serviceCategory: e.target.value as 'Plumbing' | 'Cleaning' | 'Electrical' | undefined })}
                         >
@@ -344,6 +345,9 @@ export const StepServices: React.FC<StepProps> = ({ data, updateData }) => {
                     <label className="text-sm font-medium text-gray-700">Years of experience <span className="text-red-500">*</span></label>
                     
                   <input 
+                    type="number"
+                    min="0"
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white text-gray-700"
                     value={data.yearsExperience}
                     onChange={(e) => updateData({ yearsExperience: e.target.value })}
                     />
@@ -809,10 +813,11 @@ export default function ProviderSignup() {
       case 0: // Personal Information
         console.log('Validating Personal Info:');
         console.log('firstName:', !!data.firstName, data.firstName);
+        console.log('lastName:', !!data.lastName, data.lastName);
         console.log('email:', !!data.email, data.email);
         console.log('phone:', !!data.phone, data.phone);
         console.log('dob:', !!data.dob, data.dob);
-        const isValid = !!(data.firstName && data.email && data.phone && data.dob);
+        const isValid = !!(data.firstName && data.lastName && data.email && data.phone && data.dob);
         console.log('Personal Info validation result:', isValid);
         return isValid;
       case 1: // Provider Type
@@ -859,122 +864,91 @@ export default function ProviderSignup() {
 
   const submitForm = async () => {
     try {
-      console.log('🚀 Starting provider registration...');
-      console.log('📊 Form data being sent:', data);
-      
-      // Create FormData object to include file upload
       const formData = new FormData();
-      
-      // Add all text fields
-      formData.append('firstName', data.firstName);
-      formData.append('lastName', data.lastName || ' '); // Send space instead of empty to satisfy required validation
-      formData.append('email', data.email);
+      const normalizedFirstName = String(data.firstName || '').trim();
+      const normalizedLastName = String(data.lastName || '').trim();
+      const normalizedEmail = String(data.email || '').trim().toLowerCase();
+      const normalizedPhone = String(data.phone || '').replace(/[^\d+]/g, '');
+      const experienceYears = Number.parseInt(String(data.yearsExperience || '0'), 10);
+      const normalizedBusinessAddress = [data.address, data.city, data.state, data.zip]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+        .join(', ');
+
+      formData.append('firstName', normalizedFirstName);
+      formData.append('lastName', normalizedLastName);
+      formData.append('email', normalizedEmail);
       formData.append('userType', 'PROVIDER');
-      formData.append('phone', data.phone);
+      formData.append('phone', normalizedPhone);
       formData.append('password', data.password);
-      formData.append('providerType', data.providerType.toUpperCase());
-      formData.append('businessName', data.businessName || data.firstName + ' Services');
-      formData.append('serviceCategory', data.serviceCategory);
-      formData.append('yearsExperience', data.yearsExperience.toString());
-      formData.append('bio', data.bio || '');
-      formData.append('hourlyRate', data.hourlyRate.toString());
-      formData.append('businessAddress', data.address + ', ' + data.city + ', ' + data.state + ' ' + data.zip);
-      formData.append('whatsapp', data.whatsapp || data.phone);
-      formData.append('preferredMethod', data.preferredMethod);
-      formData.append('paymentMethod', data.paymentMethod);
-      formData.append('upiId', data.upiId || '');
-      formData.append('panNumber', data.panNumber || '');
-      formData.append('aadhaarNumber', data.aadhaarNumber || '');
-      formData.append('agreedToTerms', data.agreedToTerms.toString());
-      formData.append('agreedToPrivacy', data.agreedToPrivacy.toString());
-      
-      // Add profile image if exists
+      formData.append('businessName', String(data.businessName || `${normalizedFirstName} Services`).trim());
+      formData.append('businessAddress', normalizedBusinessAddress);
+      formData.append('area', String(data.city || 'Not specified').trim());
+      formData.append('serviceCategory', String(data.serviceCategory || 'General'));
+      formData.append('yearsExperience', String(Number.isFinite(experienceYears) ? Math.max(experienceYears, 0) : 0));
+
+      if (String(data.panNumber || '').trim()) {
+        formData.append('panNumber', String(data.panNumber).trim());
+      }
+      if (String(data.aadhaarNumber || '').trim()) {
+        formData.append('aadhaarNumber', String(data.aadhaarNumber).trim());
+      }
+      if (String(data.upiId || '').trim()) {
+        formData.append('upiId', String(data.upiId).trim());
+      }
       if (data.profilePhoto instanceof File) {
         formData.append('profileImage', data.profilePhoto);
-        console.log('📷 Profile image added to FormData:', data.profilePhoto.name);
       }
-      
-      console.log('📝 FormData prepared for upload');
-      console.log('📡 Sending request to: /api/auth/register');
-      
-      // Log FormData contents
-      console.log('📋 FormData contents:');
-      for (let pair of formData.entries()) {
-        console.log(pair[0], pair[1]);
-      }
-      
-      // OLD
 
+      const response = await fetch(`${API_BASE}/api/auth/register`, {
+        method: 'POST',
+        body: formData
+      });
 
-console.log('📡 Sending request to:', `${API_BASE}/api/auth/register`);
-
-const response = await fetch(`${API_BASE}/api/auth/register`, {
-  method: 'POST',
-  body: formData,
-});
-
-
-      
-      
-
-      
-      console.log('📥 Response status:', response.status);
-      
       const contentType = response.headers.get('content-type');
-      console.log('📄 Content-Type:', contentType);
-      
       if (!contentType || !contentType.includes('application/json')) {
         const text = await response.text();
-        console.error('❌ Non-JSON response:', text);
         throw new Error('Server returned non-JSON response: ' + text.substring(0, 100));
       }
-      
+
       const result = await response.json();
-      console.log('📊 Response data:', result);
-      console.log('📊 Response data.success:', result.success);
-      console.log('📊 Response data.message:', result.message);
-      console.log('📊 Response data.errors:', result.errors);
-      console.log('FULL BACKEND RESPONSE:', result);
-      console.log('ERROR DETAILS:', result.errors);
-      console.log('ERROR DETAILS STRING:');
-      console.log(JSON.stringify(result.errors, null, 2));
-      
-      if (result.success) {
-        console.log('✅ Registration successful!');
-        
-        // Store auth tokens
-        localStorage.setItem('token', result.data.token);
-        localStorage.setItem('userType', 'PROVIDER');
-        localStorage.setItem('userId', result.data.user.id);
-        localStorage.setItem('providerId', result.data.provider.id);
-        
-        console.log('🎫 Tokens stored:', {
-          token: result.data.token.substring(0, 20) + '...',
-          userType: 'PROVIDER',
-          userId: result.data.user.id,
-          providerId: result.data.provider.id
-        });
-        
-        // Navigate to provider dashboard
-        console.log('🔄 Navigating to provider dashboard...');
-        navigate('/provider/dashboard');
-      } else {
-        console.error('❌ Registration failed:', result.message);
-        throw new Error(result.message || 'Registration failed');
+      if (!result.success) {
+        const validationDetails = Array.isArray(result.errors)
+          ? result.errors.map((err: { path?: string; msg?: string }) => `${err.path || 'field'}: ${err.msg || 'invalid'}`).join(', ')
+          : '';
+
+        throw new Error(validationDetails ? `${result.message}: ${validationDetails}` : (result.message || 'Registration failed'));
       }
-    } catch (error) {
-      console.error('❌ Registration error:', error);
-      console.error('❌ Error details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name
-      });
-      alert('Registration failed: ' + error.message);
+
+      const accessToken = result?.data?.accessToken;
+      const refreshToken = result?.data?.refreshToken;
+      const user = result?.data?.user;
+      const providerId = user?.provider?.id;
+
+      if (accessToken) {
+        localStorage.setItem('accessToken', accessToken);
+        localStorage.setItem('token', accessToken);
+      }
+      if (refreshToken) {
+        localStorage.setItem('refreshToken', refreshToken);
+      }
+      if (user?.id) {
+        localStorage.setItem('userId', String(user.id));
+      }
+      localStorage.setItem('userType', 'PROVIDER');
+      if (providerId) {
+        localStorage.setItem('providerId', String(providerId));
+      }
+
+      navigate('/provider/dashboard');
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      alert('Registration failed: ' + (error?.message || 'Unknown error'));
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900" style={{ fontFamily: '"Inter", "Segoe UI", sans-serif' }}>
       <div className="min-h-screen backdrop-blur-lg bg-black/20">
         {/* Header */}
         <div className="absolute top-0 left-0 right-0 p-4 sm:p-6">
@@ -1035,13 +1009,13 @@ const response = await fetch(`${API_BASE}/api/auth/register`, {
             </div>
 
             {/* Form container */}
-            <div className="bg-white/10 backdrop-blur-md rounded-3xl p-4 sm:p-8 border border-white/20">
+            <div className="bg-white rounded-3xl p-4 sm:p-8 border border-gray-200 shadow-2xl">
               <div className="text-center mb-8">
-                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Store className="w-8 h-8 text-white" />
+                <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Store className="w-8 h-8 text-indigo-700" />
                 </div>
-                <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Create Your Provider Account</h2>
-                <p className="text-white/70">Join thousands of service providers on ServoLeY</p>
+                <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Create Your Provider Account</h2>
+                <p className="text-gray-600">Join thousands of service providers on ServoLeY</p>
               </div>
 
               {/* Step Content */}
@@ -1056,8 +1030,8 @@ const response = await fetch(`${API_BASE}/api/auth/register`, {
                   disabled={currentStep === 0}
                   className={`w-full sm:w-auto px-6 py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
                     currentStep === 0
-                      ? 'bg-white/10 text-white/50 cursor-not-allowed'
-                      : 'bg-white/10 border border-white/20 text-white hover:bg-white/20'
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
                   }`}
                 >
                   <ArrowLeft className="w-5 h-5" />
