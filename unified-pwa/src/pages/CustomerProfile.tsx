@@ -25,6 +25,43 @@ const parseJsonSafe = async (response: Response) => {
   }
 };
 
+const MAX_AVATAR_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_AVATAR_DIMENSION = 720;
+const AVATAR_OUTPUT_QUALITY = 0.82;
+
+const readImageFile = (file: File): Promise<HTMLImageElement> =>
+  new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Unable to read selected image'));
+    };
+    image.src = objectUrl;
+  });
+
+const resizeAvatarToDataUrl = async (file: File): Promise<string> => {
+  const image = await readImageFile(file);
+  const scale = Math.min(1, MAX_AVATAR_DIMENSION / Math.max(image.width, image.height));
+  const targetWidth = Math.max(1, Math.round(image.width * scale));
+  const targetHeight = Math.max(1, Math.round(image.height * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('Image processing is unavailable in this browser');
+  }
+
+  context.drawImage(image, 0, 0, targetWidth, targetHeight);
+  return canvas.toDataURL('image/jpeg', AVATAR_OUTPUT_QUALITY);
+};
+
 interface SecuritySession {
   id: string;
   label: string;
@@ -300,6 +337,18 @@ const CustomerProfile: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file.');
+      e.target.value = '';
+      return;
+    }
+
+    if (file.size > MAX_AVATAR_FILE_SIZE_BYTES) {
+      alert('Image is too large. Please use an image smaller than 5 MB.');
+      e.target.value = '';
+      return;
+    }
+
     setUploading(true);
     try {
       console.log('Uploading profile photo:', file.name);
@@ -309,12 +358,7 @@ const CustomerProfile: React.FC = () => {
       setUserData(prev => ({ ...prev, avatar: previewUrl }));
 
       // Upload to server
-      const fileDataUrl: string = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
+      const fileDataUrl = await resizeAvatarToDataUrl(file);
 
       const response = await fetchWithFallback('/api/auth/me/avatar', {
         method: 'PUT',
@@ -328,7 +372,10 @@ const CustomerProfile: React.FC = () => {
       const result = await parseJsonSafe(response);
       
       if (!response.ok || !result?.success) {
-        throw new Error(result?.message || 'Upload failed');
+        const validationMessage = Array.isArray(result?.errors) && result.errors.length > 0
+          ? String(result.errors[0]?.msg || '')
+          : '';
+        throw new Error(validationMessage || result?.message || 'Upload failed');
       }
 
       const updatedAvatar = result?.data?.avatar || fileDataUrl;
@@ -341,9 +388,11 @@ const CustomerProfile: React.FC = () => {
       alert('Profile photo updated successfully!');
     } catch (error) {
       console.error('Error uploading profile photo:', error);
-      alert('Failed to upload profile photo. Please try again.');
+      const message = error instanceof Error ? error.message : 'Failed to upload profile photo. Please try again.';
+      alert(message);
     } finally {
       setUploading(false);
+      e.target.value = '';
     }
   };
 

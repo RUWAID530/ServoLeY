@@ -443,7 +443,13 @@ router.put(
 router.put(
   '/me/avatar',
   authenticateToken,
-  strictBody([body('avatar').isString().trim().isLength({ min: 1, max: 200000 })]),
+  strictBody([
+    body('avatar')
+      .isString()
+      .trim()
+      .isLength({ min: 1, max: 900000 })
+      .withMessage('Avatar payload is too large. Please upload a smaller image.')
+  ]),
   async (req, res, next) => {
   try {
     const avatar = String(req.body.avatar || '').trim();
