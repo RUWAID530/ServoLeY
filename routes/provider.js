@@ -15,6 +15,7 @@ const router = express.Router();
 const providerPayoutScheduleStore = new Map();
 const providerPaymentMethodsStore = new Map();
 const isMockPaymentEnabled = () => ['true', '1', 'yes'].includes(String(process.env.MOCK_PAYMENT || '').trim().toLowerCase());
+const isServiceAutoApproveEnabled = () => ['true', '1', 'yes'].includes(String(process.env.AUTO_APPROVE_PROVIDER_SERVICES || 'true').trim().toLowerCase());
 
 const getMockProviderPaymentMethods = (userId) => {
   const key = String(userId || '').trim();
@@ -470,21 +471,51 @@ router.post('/services', [
 
     console.log('✅ Provider found:', provider.id);
     
+    const name = String(req.body.name || '').trim();
+    const category = String(req.body.category || '').trim();
+    const description = String(req.body.description || '').trim();
+    const price = Number(req.body.price);
+    const durationValue = Number(req.body.duration ?? req.body.estimatedTime ?? 60);
+    const basePrice = req.body.basePrice !== undefined ? Number(req.body.basePrice) : null;
+    const offerPercent = req.body.offerPercent !== undefined ? Number(req.body.offerPercent) : 0;
+    const estimatedTime = req.body.estimatedTime !== undefined ? Number(req.body.estimatedTime) : null;
+    const warrantyMonths = req.body.warrantyMonths !== undefined ? Number(req.body.warrantyMonths) : null;
+
+    if (!Number.isFinite(price) || price <= 0) {
+      return res.status(400).json({ success: false, message: 'Price must be greater than 0' });
+    }
+    if (!Number.isFinite(durationValue) || durationValue < 1) {
+      return res.status(400).json({ success: false, message: 'Duration must be at least 1 minute' });
+    }
+    if (basePrice !== null && (!Number.isFinite(basePrice) || basePrice <= 0)) {
+      return res.status(400).json({ success: false, message: 'Base price must be greater than 0' });
+    }
+    if (!Number.isFinite(offerPercent) || offerPercent < 0 || offerPercent > 100) {
+      return res.status(400).json({ success: false, message: 'Offer percent must be between 0 and 100' });
+    }
+    if (estimatedTime !== null && (!Number.isFinite(estimatedTime) || estimatedTime < 1)) {
+      return res.status(400).json({ success: false, message: 'Estimated time must be at least 1 minute' });
+    }
+    if (warrantyMonths !== null && (!Number.isFinite(warrantyMonths) || warrantyMonths < 0)) {
+      return res.status(400).json({ success: false, message: 'Warranty months must be 0 or greater' });
+    }
+
+    const autoApprove = isServiceAutoApproveEnabled();
     const service = await prisma.services.create({
       data: {
         id: randomUUID(),
         providerId: provider.id,
-        name: req.body.name,
-        category: req.body.category,
-        description: req.body.description,
-        price: req.body.price,
-        duration: req.body.duration || req.body.estimatedTime || 60,
-        basePrice: req.body.basePrice || null,
-        offerPercent: req.body.offerPercent ?? 0,
-        estimatedTime: req.body.estimatedTime || null,
-        warrantyMonths: req.body.warrantyMonths || null,
-        status: 'PENDING_VERIFICATION', // Set status to pending verification
-        isActive: false, // Set to false until admin approval
+        name,
+        category,
+        description,
+        price,
+        duration: Math.max(1, Math.round(durationValue)),
+        basePrice: basePrice === null ? null : basePrice,
+        offerPercent: Math.round(offerPercent),
+        estimatedTime: estimatedTime === null ? null : Math.max(1, Math.round(estimatedTime)),
+        warrantyMonths: warrantyMonths === null ? null : Math.max(0, Math.round(warrantyMonths)),
+        status: autoApprove ? 'ACTIVE' : 'PENDING_VERIFICATION',
+        isActive: autoApprove,
         createdAt: new Date(),
         updatedAt: new Date()
       }
@@ -494,15 +525,18 @@ router.post('/services', [
       success: true, 
       data: { 
         service,
-        status: 'pending_verification', // Include status for frontend routing
-        message: 'Service created and sent for admin verification'
+        status: autoApprove ? 'active' : 'pending_verification',
+        message: autoApprove
+          ? 'Service created and published successfully'
+          : 'Service created and sent for admin verification'
       } 
     });
   } catch (e) {
     console.error('Create provider service failed for user:', req.user?.id);
+    console.error('Create provider service error details:', e);
     res.status(500).json({
       success: false,
-      message: 'Failed to create service'
+      message: e?.message || 'Failed to create service'
     });
   }
 });
@@ -528,20 +562,22 @@ router.put('/services/:id', [
     if (!provider) return res.status(404).json({ success: false, message: 'Provider not found' });
     const service = await prisma.services.findFirst({ where: { id: req.params.id, providerId: provider.id } });
     if (!service) return res.status(404).json({ success: false, message: 'Service not found' });
+    const updateData = {
+      ...(req.body.name && { name: String(req.body.name).trim() }),
+      ...(req.body.category && { category: String(req.body.category).trim() }),
+      ...(req.body.description && { description: String(req.body.description).trim() }),
+      ...(req.body.price !== undefined && { price: Number(req.body.price) }),
+      ...(req.body.duration !== undefined && { duration: Math.max(1, Math.round(Number(req.body.duration))) }),
+      ...(req.body.basePrice !== undefined && { basePrice: Number(req.body.basePrice) }),
+      ...(req.body.offerPercent !== undefined && { offerPercent: Math.round(Number(req.body.offerPercent)) }),
+      ...(req.body.estimatedTime !== undefined && { estimatedTime: Math.max(1, Math.round(Number(req.body.estimatedTime))) }),
+      ...(req.body.warrantyMonths !== undefined && { warrantyMonths: Math.max(0, Math.round(Number(req.body.warrantyMonths))) }),
+      updatedAt: new Date()
+    };
+
     const updated = await prisma.services.update({
       where: { id: service.id },
-      data: {
-        ...(req.body.name && { name: req.body.name }),
-        ...(req.body.category && { category: req.body.category }),
-        ...(req.body.description && { description: req.body.description }),
-        ...(req.body.price && { price: req.body.price }),
-        ...(req.body.duration !== undefined && { duration: req.body.duration }),
-        ...(req.body.basePrice && { basePrice: req.body.basePrice }),
-        ...(req.body.offerPercent !== undefined && { offerPercent: req.body.offerPercent }),
-        ...(req.body.estimatedTime !== undefined && { estimatedTime: req.body.estimatedTime }),
-        ...(req.body.warrantyMonths !== undefined && { warrantyMonths: req.body.warrantyMonths }),
-        updatedAt: new Date()
-      }
+      data: updateData
     });
     res.json({ success: true, data: { service: updated } });
   } catch (e) {

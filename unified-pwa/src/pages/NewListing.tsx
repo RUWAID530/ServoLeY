@@ -66,7 +66,7 @@ const NewListing: React.FC = () => {
     document.body.appendChild(input);
     input.click();
   };
-  const [category, setCategory] = useState("General Services");
+  const [category, setCategory] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [radius, setRadius] = useState(12);
   const [location, setLocation] = useState("Your Service Area");
@@ -99,27 +99,9 @@ const NewListing: React.FC = () => {
     "Digital Services": ["Software Development", "Content Writing", "Social Media", "SEO", "Graphic Design"]
   };
   
-  const [selectedServices, setSelectedServices] = useState<ListingService[]>([
-    {
-      id: '1',
-      name: 'Display replacement',
-      price: 1299,
-      description: 'Quick display replacement with 3 months touch & brightness warranty.',
-      image: 'https://picsum.photos/seed/display/200/200',
-      visitChargeEnabled: true,
-      serviceOnlyPrice: true
-    },
-    {
-      id: '2',
-      name: 'Battery replacement',
-      price: 899,
-      description: 'Ideal for smartphones with fast draining battery',
-      visitChargeEnabled: false,
-      serviceOnlyPrice: false
-    }
-  ]);
+  const [selectedServices, setSelectedServices] = useState<ListingService[]>([]);
 
-  const availableServices = categoryServices[category] || categoryServices["General Services"];
+  const availableServices = category ? (categoryServices[category] || []) : [];
 
   // Filter services based on search query
   const filteredServices = availableServices.filter(service => 
@@ -138,6 +120,33 @@ const NewListing: React.FC = () => {
         serviceOnlyPrice: false
       }]);
     }
+  };
+
+  const handleAddCustomService = () => {
+    if (!category) {
+      alert('Please select a category first.');
+      return;
+    }
+
+    const customName = window.prompt('Enter custom service name');
+    const normalizedName = String(customName || '').trim();
+    if (!normalizedName) return;
+
+    if (selectedServices.find((s) => s.name.toLowerCase() === normalizedName.toLowerCase())) {
+      alert('This service is already selected.');
+      return;
+    }
+
+    setSelectedServices((prev) => [
+      ...prev,
+      {
+        id: Math.random().toString(36).slice(2, 11),
+        name: normalizedName,
+        description: '',
+        visitChargeEnabled: false,
+        serviceOnlyPrice: false
+      }
+    ]);
   };
 
   const handleUpdateService = (id: string, updates: Partial<ListingService>) => {
@@ -184,6 +193,10 @@ const NewListing: React.FC = () => {
       }
       
       // Validate all services before submission
+      if (!category) {
+        throw new Error('Please select a service category');
+      }
+
       for (const service of selectedServices) {
         if (!service.name || service.name.trim() === '') {
           throw new Error('Service name is required');
@@ -272,6 +285,10 @@ const NewListing: React.FC = () => {
   };
 
   const getFormValidationMessage = () => {
+    if (!category) {
+      return "Please select a service category";
+    }
+
     if (selectedServices.length === 0) {
       return "Please select at least one service";
     }
@@ -295,13 +312,14 @@ const NewListing: React.FC = () => {
   };
 
   const isFormValid = useMemo(() => {
+    const hasCategory = !!category;
     const hasSelectedServices = selectedServices.length > 0;
     const allServicesHavePrice = selectedServices.every(s => s.price !== undefined && s.price !== null && s.price > 0);
     const allServicesHaveDescription = selectedServices.every(s => s.description && s.description.trim().length > 0);
     const allServicesHaveImage = selectedServices.every(s => s.image);
     
-    return hasSelectedServices && allServicesHavePrice && allServicesHaveDescription && allServicesHaveImage;
-  }, [selectedServices]);
+    return hasCategory && hasSelectedServices && allServicesHavePrice && allServicesHaveDescription && allServicesHaveImage;
+  }, [category, selectedServices]);
 
     return (
     <div className="min-h-screen pb-24 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-200">
@@ -372,8 +390,14 @@ const NewListing: React.FC = () => {
                   <select 
                     className="w-full bg-gradient-to-r from-white/10 to-white/5 border border-white/20 rounded-lg py-2.5 pl-10 pr-4 text-sm placeholder:text-slate-500 focus:outline-none focus:border-teal-500 focus:bg-white/10 transition-all duration-300 appearance-none cursor-pointer"
                     value={category}
-                    onChange={(e) => setCategory(e.target.value)}
+                    onChange={(e) => {
+                      const nextCategory = e.target.value;
+                      setCategory(nextCategory);
+                      setSearchQuery('');
+                      setSelectedServices([]);
+                    }}
                   >
+                    <option value="" disabled>Select a category</option>
                     {serviceCategories.map((cat) => (
                       <option key={cat} value={cat}>{cat}</option>
                     ))}
@@ -384,13 +408,15 @@ const NewListing: React.FC = () => {
                 <div className="mt-6">
                   <div className="flex justify-between items-center mb-3">
                     <label className="text-sm text-slate-400">Select services</label>
-                    <span className="text-xs text-slate-500 italic">Pick all of your {category.toLowerCase()} services</span>
+                    <span className="text-xs text-slate-500 italic">
+                      {category ? `Pick all of your ${category.toLowerCase()} services` : 'Select a category to see services'}
+                    </span>
                   </div>
                   <div className="relative mb-4">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                     <input 
                       type="text" 
-                      placeholder={`Search ${category.toLowerCase()} services...`} 
+                      placeholder={category ? `Search ${category.toLowerCase()} services...` : 'Search services...'} 
                       className="w-full bg-gradient-to-r from-white/10 to-white/5 border border-white/20 rounded-lg py-2.5 pl-10 pr-4 text-sm placeholder:text-slate-500 focus:outline-none focus:border-teal-500 focus:bg-white/10 transition-all duration-300"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
@@ -412,7 +438,11 @@ const NewListing: React.FC = () => {
                         {selectedServices.find(s => s.name === service) ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
                       </button>
                     ))}
-                    <button className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-gradient-to-r from-white/10 to-white/5 text-slate-400 border border-white/20 hover:border-teal-500/50 hover:text-teal-400 transition-all duration-300">
+                    <button
+                      type="button"
+                      onClick={handleAddCustomService}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-gradient-to-r from-white/10 to-white/5 text-slate-400 border border-white/20 hover:border-teal-500/50 hover:text-teal-400 transition-all duration-300"
+                    >
                       <Plus className="w-3 h-3" /> Add custom service
                     </button>
                   </div>
@@ -611,7 +641,7 @@ const NewListing: React.FC = () => {
             <div className="space-y-4 mb-8">
               <div className="flex justify-between items-center">
                 <span className="text-sm text-slate-400">Category</span>
-                <span className="text-sm font-bold text-white">{category}</span>
+                <span className="text-sm font-bold text-white">{category || 'Not selected'}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-slate-400">Total services</span>
