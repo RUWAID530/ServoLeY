@@ -9,7 +9,7 @@ const { loginLimiter, registrationLimiter, otpVerifyLimiter } = require('../midd
 const { strictBody } = require('../middleware/validation');
 const { signAccessToken, signRefreshToken } = require('../utils/jwt');
 const { createRefreshSession, validateRefreshSession, revokeSession, revokeUserSessions } = require('../utils/refreshSessions');
-const { encryptField } = require('../utils/encryption');
+const encryptionService = require('../utils/encryption');
 
 const router = express.Router();
 const upload = multer({ dest: 'uploads/' });
@@ -193,11 +193,11 @@ router.post(
               category,
               area: String(req.body.area || 'Not specified'),
               address: businessAddress,
-              panNumber: encryptField(req.body.panNumber || `TEMP${randomInt(10000000, 99999999)}`),
-              aadhaarNumber: encryptField(req.body.aadhaarNumber || `TEMP${randomInt(10000000, 99999999)}`),
-              gstNumber: req.body.gstNumber ? encryptField(req.body.gstNumber) : null,
-              bankAccount: req.body.bankAccount ? encryptField(req.body.bankAccount) : null,
-              upiId: req.body.upiId ? encryptField(req.body.upiId) : null,
+              panNumber: encryptionService.encryptField(req.body.panNumber || `TEMP${randomInt(10000000, 99999999)}`),
+              aadhaarNumber: encryptionService.encryptField(req.body.aadhaarNumber || `TEMP${randomInt(10000000, 99999999)}`),
+              gstNumber: req.body.gstNumber ? encryptionService.encryptField(req.body.gstNumber) : null,
+              bankAccount: req.body.bankAccount ? encryptionService.encryptField(req.body.bankAccount) : null,
+              upiId: req.body.upiId ? encryptionService.encryptField(req.body.upiId) : null,
               isVerified: false,
               isActive: true,
               rating: 0,
@@ -737,6 +737,102 @@ router.post(
       return res.json({
         success: true,
         message: 'Password reset successfully'
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+);
+
+router.delete(
+  '/me',
+  authenticateToken,
+  strictBody([
+    body('confirmText')
+      .isString()
+      .trim()
+      .equals('DELETE')
+      .withMessage('Please type DELETE to confirm account deletion')
+  ]),
+  async (req, res, next) => {
+    try {
+      const now = new Date();
+      const randomPasswordHash = await bcrypt.hash(randomUUID(), BCRYPT_ROUNDS);
+
+      await prisma.$transaction(async (tx) => {
+        await tx.providers.updateMany({
+          where: { userId: req.user.id },
+          data: {
+            isActive: false,
+            isOnline: false,
+            updatedAt: now
+          }
+        });
+
+        await tx.user_payment_methods.updateMany({
+          where: { userId: req.user.id },
+          data: {
+            upiId: null,
+            cardNumber: null,
+            cardName: null,
+            expiryMonth: null,
+            expiryYear: null,
+            last4: null,
+            isDefault: false,
+            isActive: false,
+            updatedAt: now
+          }
+        });
+
+        await tx.notification_tokens.deleteMany({
+          where: { userId: req.user.id }
+        });
+
+        await tx.notification_preferences.deleteMany({
+          where: { userId: req.user.id }
+        });
+
+        await tx.user_verifications.deleteMany({
+          where: { userId: req.user.id }
+        });
+
+        await tx.profiles.updateMany({
+          where: { userId: req.user.id },
+          data: {
+            firstName: 'Deleted',
+            lastName: 'User',
+            avatar: null,
+            address: null,
+            pincode: null,
+            city: null,
+            state: null,
+            country: 'India',
+            googleId: null,
+            googleVerified: false,
+            passwordHash: randomPasswordHash,
+            updatedAt: now
+          }
+        });
+
+        await tx.users.update({
+          where: { id: req.user.id },
+          data: {
+            email: null,
+            phone: null,
+            isActive: false,
+            isBlocked: true,
+            isVerified: false,
+            tokenVersion: { increment: 1 },
+            updatedAt: now
+          }
+        });
+      });
+
+      await revokeUserSessions(req.user.id);
+
+      return res.json({
+        success: true,
+        message: 'Account deleted successfully'
       });
     } catch (error) {
       return next(error);

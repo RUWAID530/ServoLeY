@@ -8,7 +8,7 @@ const { strictBody } = require('../middleware/validation');
 const { randomUUID } = require('crypto');
 const { requireIdempotency } = require('../middleware/idempotency');
 const { assertTransition } = require('../utils/stateMachine');
-const { encryptField } = require('../utils/encryption');
+const encryptionService = require('../utils/encryption');
 
 const router = express.Router();
 
@@ -240,8 +240,8 @@ router.get('/me', authenticateToken, requireRole('PROVIDER'), async (req, res) =
           category: 'General',
           area: 'Not specified',
           address: '',
-          panNumber: encryptField('TEMP' + Math.random().toString(36).substring(2, 10).toUpperCase()),
-          aadhaarNumber: encryptField('TEMP' + Math.random().toString(36).substring(2, 10).toUpperCase()),
+          panNumber: encryptionService.encryptField('TEMP' + Math.random().toString(36).substring(2, 10).toUpperCase()),
+          aadhaarNumber: encryptionService.encryptField('TEMP' + Math.random().toString(36).substring(2, 10).toUpperCase()),
           isVerified: false,
           isActive: true,
           rating: 0,
@@ -337,7 +337,7 @@ router.patch('/profile', authenticateToken, requireRole('PROVIDER'), async (req,
     if (category !== undefined) providerUpdateData.category = category;
     if (area !== undefined) providerUpdateData.area = area;
     if (address !== undefined) providerUpdateData.address = address;
-    if (upiId !== undefined) providerUpdateData.upiId = upiId ? encryptField(upiId) : null;
+    if (upiId !== undefined) providerUpdateData.upiId = upiId ? encryptionService.encryptField(upiId) : null;
 
     // Update provider if there are changes
     let updatedProvider = provider;
