@@ -813,11 +813,10 @@ export default function ProviderSignup() {
       case 0: // Personal Information
         console.log('Validating Personal Info:');
         console.log('firstName:', !!data.firstName, data.firstName);
-        console.log('lastName:', !!data.lastName, data.lastName);
         console.log('email:', !!data.email, data.email);
         console.log('phone:', !!data.phone, data.phone);
         console.log('dob:', !!data.dob, data.dob);
-        const isValid = !!(data.firstName && data.lastName && data.email && data.phone && data.dob);
+        const isValid = !!(data.firstName && data.email && data.phone && data.dob);
         console.log('Personal Info validation result:', isValid);
         return isValid;
       case 1: // Provider Type
@@ -865,8 +864,11 @@ export default function ProviderSignup() {
   const submitForm = async () => {
     try {
       const formData = new FormData();
-      const normalizedFirstName = String(data.firstName || '').trim();
-      const normalizedLastName = String(data.lastName || '').trim();
+      const fullName = String(data.firstName || '').trim().replace(/\s+/g, ' ');
+      const explicitLastName = String(data.lastName || '').trim();
+      const [derivedFirstName, ...derivedLastParts] = fullName.split(' ').filter(Boolean);
+      const normalizedFirstName = derivedFirstName || fullName || 'Provider';
+      const normalizedLastName = explicitLastName || derivedLastParts.join(' ') || 'Provider';
       const normalizedEmail = String(data.email || '').trim().toLowerCase();
       const normalizedPhone = String(data.phone || '').replace(/[^\d+]/g, '');
       const experienceYears = Number.parseInt(String(data.yearsExperience || '0'), 10);
