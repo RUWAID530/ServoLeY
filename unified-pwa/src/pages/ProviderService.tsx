@@ -227,20 +227,20 @@ export function ServicesView() {
   };
 
   return (
-    <div className="flex-1 flex">
-      <main className="flex-1 p-6">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-3xl font-bold">Services</h1>
-          <div className="flex gap-2">
+    <div className="flex-1 flex flex-col xl:flex-row">
+      <main className="flex-1 p-4 sm:p-6">
+        <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <h1 className="text-2xl sm:text-3xl font-bold">Services</h1>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
             <button
               onClick={() => navigate('/provider/new-listing')}
-              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded-lg font-medium text-white transition-colors"
+              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded-lg font-medium text-white transition-colors text-center"
             >
               New Category
             </button>
             <button
               onClick={() => navigate('/provider/new-listing')}
-              className="px-4 py-2 bg-cyan-500 hover:bg-cyan-600 rounded-lg font-medium text-white transition-colors flex items-center gap-2"
+              className="px-4 py-2 bg-cyan-500 hover:bg-cyan-600 rounded-lg font-medium text-white transition-colors flex items-center justify-center gap-2"
             >
               <Plus size={20} />
               Add Service
@@ -248,40 +248,42 @@ export function ServicesView() {
           </div>
         </div>
 
-        <div className="flex gap-2 mb-6">
-          {(['all', 'active', 'pending_verification', 'rejected', 'inactive'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => {
-                setActiveTab(tab);
-                setCurrentPage(1);
-              }}
-              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                activeTab === tab
-                  ? 'bg-cyan-600 text-white'
-                  : 'bg-slate-800 text-white hover:bg-slate-700'
-              }`}
-            >
-              {tab === 'pending_verification' ? 'Pending' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </button>
-          ))}
+        <div className="mb-6 -mx-1 overflow-x-auto px-1">
+          <div className="flex min-w-max gap-2">
+            {(['all', 'active', 'pending_verification', 'rejected', 'inactive'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => {
+                  setActiveTab(tab);
+                  setCurrentPage(1);
+                }}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                  activeTab === tab
+                    ? 'bg-cyan-600 text-white'
+                    : 'bg-slate-800 text-white hover:bg-slate-700'
+                }`}
+              >
+                {tab === 'pending_verification' ? 'Pending' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="bg-slate-900 rounded-lg p-6 mb-6">
+        <div className="bg-slate-900 rounded-lg p-4 sm:p-6 mb-6">
           <h2 className="text-lg font-semibold mb-4">Service catalog</h2>
 
-          <div className="flex gap-3 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
             <input
               type="text"
               placeholder="Search by name..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              className="w-full sm:col-span-2 xl:col-span-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
             />
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
             >
               <option value="All">Category: All</option>
               {categories.map((cat) => (
@@ -293,14 +295,14 @@ export function ServicesView() {
             <select
               value={selectedDuration}
               onChange={(e) => setSelectedDuration(e.target.value)}
-              className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
             >
               <option>Duration: Any</option>
             </select>
             <select
               value={selectedPrice}
               onChange={(e) => setSelectedPrice(e.target.value)}
-              className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
             >
               <option>Price: Any</option>
             </select>
@@ -312,8 +314,8 @@ export function ServicesView() {
             onDeactivate={handleDeactivate}
           />
 
-          <div className="flex items-center justify-between mt-4">
-            <div className="flex items-center gap-2">
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                 disabled={currentPage === 1}
@@ -339,7 +341,7 @@ export function ServicesView() {
                 <ChevronRight size={20} />
               </button>
             </div>
-            <p className="text-sm text-white opacity-80">
+            <p className="text-sm text-white opacity-80 sm:text-right">
               Showing {filteredServices.length === 0 ? 0 : Math.min(filteredServices.length, (currentPage - 1) * itemsPerPage + 1)} to{' '}
               {Math.min(filteredServices.length, currentPage * itemsPerPage)} of {filteredServices.length} services
             </p>
@@ -347,7 +349,7 @@ export function ServicesView() {
         </div>
       </main>
 
-      <aside className="w-80 bg-slate-900 p-6 border-l border-slate-700">
+      <aside className="w-full xl:w-80 bg-slate-900 p-4 sm:p-6 border-t border-slate-700 xl:border-t-0 xl:border-l">
         <Summary
           activeCount={activeServices.length}
           avgPrice={avgPrice}

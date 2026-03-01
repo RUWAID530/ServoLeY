@@ -108,22 +108,22 @@ const CustomerDashboard: React.FC = () => {
       {/* Header */}
       <header className="bg-white/10 backdrop-blur-md border-b border-white/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center space-x-4">
-              <h1 className="text-2xl font-bold text-white">ServoLeY</h1>
-              <span className="text-white/60">Customer Dashboard</span>
+          <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center justify-between sm:justify-start sm:space-x-4">
+              <h1 className="text-xl sm:text-2xl font-bold text-white">ServoLeY</h1>
+              <span className="hidden sm:inline text-white/60">Customer Dashboard</span>
             </div>
             
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center justify-between sm:justify-end space-x-3 sm:space-x-4">
               <button className="relative p-2 text-white/80 hover:text-white transition-colors">
-                <Bell className="w-6 h-6" />
+                <Bell className="w-5 h-5 sm:w-6 sm:h-6" />
                 <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
               </button>
               
               <div className="flex items-center space-x-3">
-                <div className="text-right">
+                <div className="text-right max-w-[170px]">
                   <p className="text-white font-medium">{userData?.firstName || 'Customer'}</p>
-                  <p className="text-white/60 text-sm">{userData?.email || 'customer@example.com'}</p>
+                  <p className="hidden sm:block text-white/60 text-sm truncate">{userData?.email || 'customer@example.com'}</p>
                 </div>
                 <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center">
                   <User className="w-6 h-6 text-white" />
@@ -135,18 +135,18 @@ const CustomerDashboard: React.FC = () => {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-24 sm:pb-28">
         {/* Welcome Section */}
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold text-white mb-2">
+        <div className="mb-6 sm:mb-8">
+          <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">
             Welcome back, {userData?.firstName || 'Customer'}! 👋
           </h2>
           <p className="text-white/70">Here's what's happening with your account today.</p>
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 sm:p-6 border border-white/20">
             <div className="flex items-center justify-between mb-4">
               <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
                 <Calendar className="w-6 h-6 text-white" />
@@ -157,7 +157,7 @@ const CustomerDashboard: React.FC = () => {
             <p className="text-white/60 text-sm">Active Bookings</p>
           </div>
 
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20">
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 sm:p-6 border border-white/20">
             <div className="flex items-center justify-between mb-4">
               <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center">
                 <TrendingUp className="w-6 h-6 text-white" />
@@ -168,7 +168,7 @@ const CustomerDashboard: React.FC = () => {
             <p className="text-white/60 text-sm">Services Used</p>
           </div>
 
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20">
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 sm:p-6 border border-white/20">
             <div className="flex items-center justify-between mb-4">
               <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center">
                 <Star className="w-6 h-6 text-white" />
@@ -179,7 +179,7 @@ const CustomerDashboard: React.FC = () => {
             <p className="text-white/60 text-sm">Average Rating</p>
           </div>
 
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20">
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 sm:p-6 border border-white/20">
             <div className="flex items-center justify-between mb-4">
               <div className="w-12 h-12 bg-gradient-to-br from-pink-500 to-pink-600 rounded-xl flex items-center justify-center">
                 <Wallet className="w-6 h-6 text-white" />
@@ -192,9 +192,9 @@ const CustomerDashboard: React.FC = () => {
         </div>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 mb-6 sm:mb-8">
           {/* Book Service */}
-          <div className="lg:col-span-2 bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20">
+          <div className="lg:col-span-2 bg-white/10 backdrop-blur-md rounded-2xl p-4 sm:p-6 border border-white/20">
             <h3 className="text-xl font-bold text-white mb-4">Quick Actions</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <button
@@ -236,7 +236,7 @@ const CustomerDashboard: React.FC = () => {
           </div>
 
           {/* Recent Activity */}
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20">
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 sm:p-6 border border-white/20">
             <h3 className="text-xl font-bold text-white mb-4">Recent Activity</h3>
             <div className="space-y-4">
               <div className="flex items-start space-x-3">
@@ -273,9 +273,9 @@ const CustomerDashboard: React.FC = () => {
         </div>
 
         {/* Payment Methods */}
-        <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-xl font-bold text-white">Your Payment Methods</h3>
+        <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 sm:p-6 border border-white/20">
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-between sm:items-center mb-4">
+            <h3 className="text-lg sm:text-xl font-bold text-white">Your Payment Methods</h3>
             <button
               onClick={() => handleNavigation('wallet', '/customer/wallet')}
               className="text-indigo-400 hover:text-indigo-300 text-sm flex items-center gap-1"
@@ -311,7 +311,7 @@ const CustomerDashboard: React.FC = () => {
       </main>
 
       {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/10 backdrop-blur-md border-t border-white/20">
+      <nav className="fixed bottom-0 left-0 right-0 bg-white/10 backdrop-blur-md border-t border-white/20 z-40">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex justify-around py-2">
             <button
@@ -320,7 +320,7 @@ const CustomerDashboard: React.FC = () => {
                 activeTab === 'home' ? 'text-white' : 'text-white/60 hover:text-white/80'
               }`}
             >
-              <Home className="w-6 h-6" />
+              <Home className="w-5 h-5 sm:w-6 sm:h-6" />
               <span className="text-xs mt-1">Home</span>
             </button>
 
@@ -330,7 +330,7 @@ const CustomerDashboard: React.FC = () => {
                 activeTab === 'services' ? 'text-white' : 'text-white/60 hover:text-white/80'
               }`}
             >
-              <Search className="w-6 h-6" />
+              <Search className="w-5 h-5 sm:w-6 sm:h-6" />
               <span className="text-xs mt-1">Services</span>
             </button>
 
@@ -340,7 +340,7 @@ const CustomerDashboard: React.FC = () => {
                 activeTab === 'wallet' ? 'text-white' : 'text-white/60 hover:text-white/80'
               }`}
             >
-              <Wallet className="w-6 h-6" />
+              <Wallet className="w-5 h-5 sm:w-6 sm:h-6" />
               <span className="text-xs mt-1">Wallet</span>
             </button>
 
@@ -350,7 +350,7 @@ const CustomerDashboard: React.FC = () => {
                 activeTab === 'profile' ? 'text-white' : 'text-white/60 hover:text-white/80'
               }`}
             >
-              <User className="w-6 h-6" />
+              <User className="w-5 h-5 sm:w-6 sm:h-6" />
               <span className="text-xs mt-1">Profile</span>
             </button>
           </div>
