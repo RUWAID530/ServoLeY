@@ -13,6 +13,7 @@ interface Service {
   duration_minutes: number;
   price: number;
   status: string;
+  is_active?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -52,6 +53,7 @@ interface ProviderServiceApi {
   price: number;
   status: string;
   isActive: boolean;
+  description?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -74,6 +76,17 @@ export function ServicesView() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
+  const getAuthToken = () => {
+    const userId = localStorage.getItem('userId');
+    const sessionId = localStorage.getItem('currentSessionId') || localStorage.getItem('sessionId') || 'default';
+    return (
+      (userId ? localStorage.getItem(`token_${userId}_${sessionId}`) : null) ||
+      (userId ? localStorage.getItem(`accessToken_${userId}_${sessionId}`) : null) ||
+      localStorage.getItem('accessToken') ||
+      localStorage.getItem('token')
+    );
+  };
+
   const normalizeStatus = (service: ProviderServiceApi) => {
     const status = String(service.status || '').toUpperCase();
     if (status === 'PENDING_VERIFICATION' || status === 'PENDING') return 'pending_verification';
@@ -89,6 +102,7 @@ export function ServicesView() {
     duration_minutes: service.duration || 60,
     price: Number(service.price) || 0,
     status: normalizeStatus(service),
+    is_active: !!service.isActive,
     category_name: service.category,
     created_at: service.createdAt,
     updated_at: service.updatedAt,
@@ -96,7 +110,10 @@ export function ServicesView() {
 
   const loadData = useCallback(async () => {
     try {
-      const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
+      const token = getAuthToken();
+      if (!token) {
+        throw new Error('Please log in again to view services.');
+      }
 
       const response = await fetch(`${API_BASE}/api/provider/services`, {
         headers: {
@@ -194,13 +211,73 @@ export function ServicesView() {
   );
 
   const handleEdit = (id: string) => {
-    console.log('Edit service:', id);
+    const service = services.find((item) => item.id === id);
+    if (!service) return;
+
+    const nextName = window.prompt('Update service name', service.name);
+    if (nextName === null) return;
+
+    const nextCategory = window.prompt('Update category', service.category_name || service.category_id || '');
+    if (nextCategory === null) return;
+
+    const nextPriceRaw = window.prompt('Update price', String(service.price));
+    if (nextPriceRaw === null) return;
+
+    const nextDurationRaw = window.prompt('Update duration (minutes)', String(service.duration_minutes));
+    if (nextDurationRaw === null) return;
+
+    const nextPrice = Number(nextPriceRaw);
+    const nextDuration = Number(nextDurationRaw);
+
+    if (!Number.isFinite(nextPrice) || nextPrice <= 0) {
+      alert('Price must be greater than 0.');
+      return;
+    }
+
+    if (!Number.isFinite(nextDuration) || nextDuration < 1) {
+      alert('Duration must be at least 1 minute.');
+      return;
+    }
+
+    const token = getAuthToken();
+    if (!token) {
+      alert('Please log in again to edit services.');
+      return;
+    }
+    fetch(`${API_BASE}/api/provider/services/${id}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: nextName.trim(),
+        category: nextCategory.trim(),
+        price: nextPrice,
+        duration: Math.round(nextDuration),
+      }),
+    })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok || !payload?.success) {
+          throw new Error(payload?.message || payload?.errors?.[0]?.msg || 'Failed to update service');
+        }
+        await loadData();
+        alert('Service updated successfully.');
+      })
+      .catch((error) => {
+        console.error('Error editing service:', error);
+        alert(error?.message || 'Failed to update service');
+      });
   };
 
   const handleDeactivate = async (id: string) => {
     try {
-      const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
-      const response = await fetch(`${API_BASE}/api/services/${id}`, {
+      const token = getAuthToken();
+      if (!token) {
+        throw new Error('Please log in again to manage services.');
+      }
+      const response = await fetch(`${API_BASE}/api/provider/services/${id}`, {
         method: 'PUT',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -211,7 +288,7 @@ export function ServicesView() {
 
       if (!response.ok) {
         const payload = await response.json();
-        throw new Error(payload?.message || 'Failed to deactivate service');
+        throw new Error(payload?.message || payload?.errors?.[0]?.msg || 'Failed to deactivate service');
       }
 
       await loadData();

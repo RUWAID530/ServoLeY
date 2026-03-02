@@ -450,6 +450,7 @@ router.post('/services', [
   body('description').notEmpty().withMessage('Description is required'),
   body('price').isFloat({ gt: 0 }).withMessage('Price must be greater than 0'),
   body('duration').optional().isInt({ min: 1 }).withMessage('Duration must be at least 1 minute'),
+  body('image').optional().isString().isLength({ max: 2000 }).withMessage('Image URL is invalid'),
   body('basePrice').optional().isFloat({ gt: 0 }).withMessage('Base price must be greater than 0'),
   body('offerPercent').optional().isInt({ min: 0, max: 100 }).withMessage('Offer percent must be between 0 and 100'),
   body('estimatedTime').optional().isInt({ min: 1 }).withMessage('Estimated time must be at least 1 minute'),
@@ -474,6 +475,7 @@ router.post('/services', [
     const name = String(req.body.name || '').trim();
     const category = String(req.body.category || '').trim();
     const description = String(req.body.description || '').trim();
+    const image = String(req.body.image || '').trim();
     const price = Number(req.body.price);
     const durationValue = Number(req.body.duration ?? req.body.estimatedTime ?? 60);
     const basePrice = req.body.basePrice !== undefined ? Number(req.body.basePrice) : null;
@@ -508,6 +510,7 @@ router.post('/services', [
         name,
         category,
         description,
+        ...(image ? { image } : {}),
         price,
         duration: Math.max(1, Math.round(durationValue)),
         basePrice: basePrice === null ? null : basePrice,
@@ -550,10 +553,12 @@ router.put('/services/:id', [
   body('description').optional().notEmpty(),
   body('price').optional().isFloat({ gt: 0 }),
   body('duration').optional().isInt({ min: 1 }),
+  body('image').optional().isString().isLength({ max: 2000 }),
   body('basePrice').optional().isFloat({ gt: 0 }),
   body('offerPercent').optional().isInt({ min: 0, max: 100 }),
   body('estimatedTime').optional().isInt({ min: 1 }),
-  body('warrantyMonths').optional().isInt({ min: 0 })
+  body('warrantyMonths').optional().isInt({ min: 0 }),
+  body('isActive').optional().isBoolean()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -566,12 +571,16 @@ router.put('/services/:id', [
       ...(req.body.name && { name: String(req.body.name).trim() }),
       ...(req.body.category && { category: String(req.body.category).trim() }),
       ...(req.body.description && { description: String(req.body.description).trim() }),
+      ...(req.body.image !== undefined && { image: String(req.body.image || '').trim() || null }),
       ...(req.body.price !== undefined && { price: Number(req.body.price) }),
       ...(req.body.duration !== undefined && { duration: Math.max(1, Math.round(Number(req.body.duration))) }),
       ...(req.body.basePrice !== undefined && { basePrice: Number(req.body.basePrice) }),
       ...(req.body.offerPercent !== undefined && { offerPercent: Math.round(Number(req.body.offerPercent)) }),
       ...(req.body.estimatedTime !== undefined && { estimatedTime: Math.max(1, Math.round(Number(req.body.estimatedTime))) }),
       ...(req.body.warrantyMonths !== undefined && { warrantyMonths: Math.max(0, Math.round(Number(req.body.warrantyMonths))) }),
+      ...(req.body.isActive !== undefined && { isActive: !!req.body.isActive }),
+      ...(req.body.isActive === false && { status: 'INACTIVE' }),
+      ...(req.body.isActive === true && String(service.status || '').toUpperCase() === 'INACTIVE' && { status: 'ACTIVE' }),
       updatedAt: new Date()
     };
 
