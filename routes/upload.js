@@ -57,8 +57,16 @@ router.post('/', authenticateToken, upload.single('image'), async (req, res) => 
       mimeType: req.file.mimetype
     };
 
-    const fileRecord = await fileOwnershipManager.storeFileOwnership(fileData);
-    const imageUrl = fileRecord.url;
+    let imageUrl = `/uploads/${req.file.filename}`;
+    try {
+      const fileRecord = await fileOwnershipManager.storeFileOwnership(fileData);
+      if (fileRecord?.url) {
+        imageUrl = fileRecord.url;
+      }
+    } catch (ownershipError) {
+      // Keep upload successful even if metadata persistence fails.
+      console.error('Failed to store file ownership:', ownershipError);
+    }
 
     res.json({
       success: true,
@@ -69,16 +77,16 @@ router.post('/', authenticateToken, upload.single('image'), async (req, res) => 
       }
     });
   } catch (error) {
-    console.error('File upload failed for user:', req.user?.id);
+    console.error('File upload failed for user:', req.user?.id, error);
     res.status(500).json({
       success: false,
-      message: 'Failed to upload image'
+      message: error?.message || 'Failed to upload image'
     });
   }
 });
 
-// Authenticated file download endpoint
-router.get('/:filename', authenticateToken, async (req, res) => {
+// Public image download endpoint for uploaded media used in service/provider cards.
+router.get('/:filename', async (req, res) => {
   try {
     const { filename } = req.params;
     
@@ -87,16 +95,6 @@ router.get('/:filename', authenticateToken, async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Invalid filename'
-      });
-    }
-
-    // Check if user has permission to access this file
-    const accessCheck = await fileOwnershipManager.checkFileAccess(filename, req.user.id, req.user.userType);
-    
-    if (!accessCheck.allowed) {
-      return res.status(accessCheck.reason === 'File not found' ? 404 : 403).json({
-        success: false,
-        message: accessCheck.reason
       });
     }
 
@@ -112,7 +110,7 @@ router.get('/:filename', authenticateToken, async (req, res) => {
     
     res.sendFile(filePath, (err) => {
       if (err) {
-        console.error('File send failed for user:', req.user?.id);
+        console.error('File send failed for filename:', filename);
         res.status(500).json({
           success: false,
           message: 'Failed to serve file'
@@ -120,12 +118,37 @@ router.get('/:filename', authenticateToken, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Download failed for user:', req.user?.id);
+    console.error('Download failed for filename:', req.params?.filename);
     res.status(500).json({
       success: false,
       message: 'Failed to download file'
     });
   }
+});
+
+router.use((err, _req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({
+        success: false,
+        message: 'Image must be 5MB or smaller'
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: err.message || 'Invalid file upload request'
+    });
+  }
+
+  if (err?.message === 'Only image files are allowed') {
+    return res.status(400).json({
+      success: false,
+      message: 'Only image files are allowed'
+    });
+  }
+
+  return next(err);
 });
 
 module.exports = router;

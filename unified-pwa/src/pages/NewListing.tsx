@@ -15,6 +15,7 @@ import { ListingService } from '../types/Index';
 import { listService, uploadImage } from '../services/api_exports';
 import { useNavigate } from 'react-router-dom';
 import { useProviderProfile } from '../contexts/ProviderProfileContext';
+import { resolveMediaUrl } from '../utils/media';
 
 
 
@@ -162,9 +163,15 @@ const NewListing: React.FC = () => {
     
     try {
       const response = await uploadImage(file);
+      if (!response?.success) {
+        throw new Error(response?.message || 'Image upload failed');
+      }
       
       // Handle the actual response structure: { success: true, data: { url: string } }
-      const imageUrl = response?.data?.url || previewUrl;
+      const imageUrl = String(response?.data?.url || '').trim();
+      if (!imageUrl) {
+        throw new Error('Image upload completed but URL was missing');
+      }
       
       // Replace the preview URL with the actual uploaded URL
       handleUpdateService(id, { image: imageUrl });
@@ -174,7 +181,8 @@ const NewListing: React.FC = () => {
         URL.revokeObjectURL(previewUrl);
       }, 1000);
     } catch (error) {
-      alert('Failed to upload image. Please try again.');
+      const message = error instanceof Error ? error.message : 'Failed to upload image. Please try again.';
+      alert(message);
       // Don't revoke the preview URL on error so the user can still see the image
     }
   };
@@ -521,7 +529,7 @@ const NewListing: React.FC = () => {
                           {service.image && !service.image.startsWith('blob:') ? (
                             <div className="relative w-full h-full flex flex-col items-center">
                               <img 
-                                src={service.image} 
+                                src={resolveMediaUrl(service.image, service.image)}
                                 alt="Service" 
                                 className="w-16 h-16 rounded object-cover mb-2"
                                 onError={(e) => {

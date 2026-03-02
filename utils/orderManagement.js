@@ -38,9 +38,9 @@ const autoReassignOrder = async (orderId, reason = 'Provider rejected') => {
         }
       },
       include: {
-        user: {
+        users: {
           include: {
-            profile: true
+            profiles: true
           }
         }
       },
@@ -350,9 +350,9 @@ const getTopProviders = async (limit = 10, startDate = null, endDate = null) => 
         }
       },
       include: {
-        user: {
+        users: {
           include: {
-            profile: true
+            profiles: true
           }
         }
       }
@@ -414,11 +414,11 @@ const getTopServices = async (limit = 10, startDate = null, endDate = null) => {
         }
       },
       include: {
-        provider: {
+        providers: {
           include: {
-            user: {
+            users: {
               include: {
-                profile: true
+                profiles: true
               }
             }
           }
@@ -432,7 +432,7 @@ const getTopServices = async (limit = 10, startDate = null, endDate = null) => {
         serviceId: item.serviceId,
         serviceName: service?.name || 'Unknown',
         category: service?.category || 'Unknown',
-        providerName: service?.provider?.businessName || 'Unknown',
+        providerName: service?.providers?.businessName || 'Unknown',
         totalOrders: item._count.serviceId,
         totalRevenue: item._sum.totalAmount || 0,
         averageOrderValue: item._count.serviceId > 0 ? (item._sum.totalAmount || 0) / item._count.serviceId : 0,
