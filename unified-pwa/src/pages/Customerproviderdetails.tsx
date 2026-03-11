@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Star, MapPin, Clock, User, Briefcase, Calendar } from 'lucide-react';
+import { resolveMediaUrl } from '../utils/media';
 
 const getProviderRecord = (service: any) => service?.providers || service?.provider || null;
 
@@ -76,7 +77,11 @@ const CustomerProviderDetails: React.FC = () => {
         <section className="rounded-2xl bg-gradient-to-r from-violet-600 to-pink-500 p-6">
           <div className="flex items-start gap-4">
             {details.providerAvatar ? (
-              <img src={details.providerAvatar} alt={details.providerName} className="w-16 h-16 rounded-full object-cover border-2 border-white" />
+              <img
+                src={resolveMediaUrl(details.providerAvatar, '')}
+                alt={details.providerName}
+                className="w-16 h-16 rounded-full object-cover border-2 border-white"
+              />
             ) : (
               <div className="w-16 h-16 rounded-full bg-white/20 border-2 border-white flex items-center justify-center">
                 <User className="w-7 h-7 text-white" />

@@ -167,7 +167,8 @@ export default function CustomerBookingsDashboard({ provider, onBack, onComplete
   const handleConfirmBooking = async () => {
     try {
       const token = localStorage.getItem('token');
-      if (!token) {
+      const authToken = token || localStorage.getItem('accessToken');
+      if (!authToken) {
         alert('Please log in again.');
         navigate('/auth');
         return;
@@ -201,7 +202,7 @@ export default function CustomerBookingsDashboard({ provider, onBack, onComplete
       const requestOptions: RequestInit = {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${authToken}`
         }
       };
 

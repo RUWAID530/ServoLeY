@@ -34,7 +34,8 @@ const ORDER_STATUS_TO_DB = {
   completed: 'COMPLETED',
   cancelled: 'CANCELLED',
   canceled: 'CANCELLED',
-  rejected: 'REJECTED'
+  rejected: 'REJECTED',
+  expired: 'EXPIRED'
 };
 
 const mapOrderStatusForClient = (status) => {
@@ -45,6 +46,7 @@ const mapOrderStatusForClient = (status) => {
   if (key === 'COMPLETED') return 'completed';
   if (key === 'CANCELLED') return 'cancelled';
   if (key === 'REJECTED') return 'rejected';
+  if (key === 'EXPIRED') return 'expired';
   return 'pending';
 };
 
@@ -778,6 +780,157 @@ router.put('/orders/:orderId/status', authenticateToken, requireRole('PROVIDER')
     return res.status(Number(error.statusCode || 500)).json({
       success: false,
       message: error.isOperational ? error.message : 'Failed to update order status'
+    });
+  }
+});
+
+router.post('/orders/accept', authenticateToken, requireRole('PROVIDER'), async (req, res) => {
+  try {
+    const orderId = String(req.body?.orderId || '').trim();
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: 'Order ID is required' });
+    }
+
+    const scope = await getProviderScope(req.user.id);
+    const providerIdAllowed = new Set((scope.where?.OR || []).map((entry) => String(entry.providerId)));
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.orders.updateMany({
+        where: {
+          id: orderId,
+          status: 'PENDING',
+          ...scope.where
+        },
+        data: {
+          status: 'ACCEPTED',
+          updatedAt: new Date()
+        }
+      });
+
+      if (result.count !== 1) {
+        return null;
+      }
+
+      const order = await tx.orders.findUnique({ where: { id: orderId } });
+      if (!order) return null;
+      if (!providerIdAllowed.has(String(order.providerId))) {
+        return null;
+      }
+      return order;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (!updated) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order already taken or no longer available or unauthorized'
+      });
+    }
+
+    try {
+      const io = req.app?.get?.('io');
+      if (io) {
+        io.emit('order_taken', { orderId: updated.id });
+      }
+    } catch (emitError) {
+      console.error('Failed to emit order_taken:', emitError);
+    }
+
+    return res.json({
+      success: true,
+      message: 'Order accepted',
+      data: { order: { id: updated.id, status: mapOrderStatusForClient(updated.status) } }
+    });
+  } catch (error) {
+    console.error('Provider accept order failed for user:', req.user?.id);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to accept order'
+    });
+  }
+});
+
+router.post('/orders/decline', authenticateToken, requireRole('PROVIDER'), async (req, res) => {
+  try {
+    const orderId = String(req.body?.orderId || '').trim();
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: 'Order ID is required' });
+    }
+
+    const scope = await getProviderScope(req.user.id);
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.orders.updateMany({
+        where: {
+          id: orderId,
+          status: 'PENDING',
+          ...scope.where
+        },
+        data: {
+          status: 'REJECTED',
+          cancelledBy: req.user.id,
+          cancelReason: 'DECLINED_BY_PROVIDER',
+          cancelledAt: new Date(),
+          updatedAt: new Date()
+        }
+      });
+
+      if (result.count !== 1) {
+        return null;
+      }
+
+      return tx.orders.findUnique({ where: { id: orderId } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (!updated) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order already taken or no longer available'
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Order declined',
+      data: { order: { id: updated.id, status: mapOrderStatusForClient(updated.status) } }
+    });
+  } catch (error) {
+    console.error('Provider decline order failed for user:', req.user?.id);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to decline order'
+    });
+  }
+});
+
+router.post('/orders/expire', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const orderId = String(req.body?.orderId || '').trim();
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: 'Order ID is required' });
+    }
+
+    const result = await prisma.orders.updateMany({
+      where: {
+        id: orderId,
+        status: 'PENDING'
+      },
+      data: {
+        status: 'EXPIRED',
+        updatedAt: new Date()
+      }
+    });
+
+    if (result.count !== 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order already processed'
+      });
+    }
+
+    return res.json({ success: true, message: 'Order expired' });
+  } catch (error) {
+    console.error('Order expire failed:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to expire order'
     });
   }
 });

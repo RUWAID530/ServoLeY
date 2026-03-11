@@ -8,7 +8,12 @@ import {
   ShieldCheck,
   Smartphone,
   Trash2,
-  Wallet
+  Wallet,
+  ArrowRight,
+  TrendingUp,
+  Clock,
+  CheckCircle,
+  AlertCircle
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Navigation from '../components/Navigation';
@@ -528,85 +533,92 @@ export const CustomerWallet: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="min-h-screen bg-gray-50">
       <CustomerHeader userImage={userImage} />
       <Navigation active="wallet" onNavigate={handleNavigate} />
 
-      <div className="pb-24 pt-4 px-4 max-w-6xl mx-auto">
-        <div className="mb-6">
-          <span className="text-pink-400 text-sm font-medium">/ Wallet</span>
-          <h1 className="text-2xl font-bold text-white mt-1">Add Money & Payment Methods</h1>
+      <div className="pb-24 pt-6 px-4 max-w-6xl mx-auto">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Wallet</h1>
+          <p className="text-gray-600">Manage your balance and payment methods</p>
         </div>
 
         {error && (
-          <div className="mb-4 px-4 py-3 rounded-xl border border-red-600/40 bg-red-600/10 text-red-300 text-sm">
+          <div className="mb-4 px-4 py-3 rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm flex items-center gap-2">
+            <AlertCircle className="h-4 w-4" />
             {error}
           </div>
         )}
 
         {info && (
-          <div className="mb-4 px-4 py-3 rounded-xl border border-emerald-600/40 bg-emerald-600/10 text-emerald-300 text-sm">
+          <div className="mb-4 px-4 py-3 rounded-xl border border-green-200 bg-green-50 text-green-700 text-sm flex items-center gap-2">
+            <CheckCircle className="h-4 w-4" />
             {info}
           </div>
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
-            <div className="bg-gradient-to-br from-fuchsia-500 to-pink-500 rounded-2xl p-6 relative overflow-hidden shadow-lg">
+            {/* Wallet Balance Card */}
+            <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-6 relative overflow-hidden shadow-lg">
               <div className="absolute top-0 right-0 p-4 opacity-10">
                 <Wallet className="w-28 h-28 text-white" />
               </div>
               <div className="relative z-10 flex justify-between items-start">
                 <div>
-                  <p className="text-white/80 text-sm font-medium">Wallet Balance</p>
+                  <p className="text-white/80 text-sm font-medium">Current Balance</p>
                   <h2 className="text-4xl font-bold text-white mt-2">
-                    {loading ? 'Loading...' : `Rs ${balance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                    {loading ? 'Loading...' : `₹${balance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                   </h2>
-                  <p className="text-white/60 text-xs mt-1">Secure top-up with saved methods</p>
+                  <p className="text-white/60 text-xs mt-1">Secure and instant transactions</p>
                 </div>
                 <div className="bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-semibold text-white flex items-center gap-1">
                   <ShieldCheck className="w-3 h-3" />
-                  Secure Payment
+                  Verified Account
                 </div>
               </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-              <h3 className="text-lg font-semibold text-white">Add Money</h3>
+            {/* Add Money Section */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Add Money</h3>
 
-              <div className="flex gap-3 overflow-x-auto pb-1 no-scrollbar">
+              <div className="flex gap-3 overflow-x-auto pb-2">
                 {quickAmounts.map((value) => (
                   <button
                     key={value}
                     onClick={() => setAmount(value)}
                     className={`min-w-[90px] py-2.5 rounded-full border text-sm font-medium transition-colors ${
                       amount === value
-                        ? 'bg-pink-100 border-pink-200 text-pink-900'
-                        : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
+                        ? 'bg-blue-600 border-blue-600 text-white'
+                        : 'bg-gray-50 border-gray-300 text-gray-700 hover:border-gray-400'
                     }`}
                   >
-                    Rs {value}
+                    ₹{value}
                   </button>
                 ))}
               </div>
 
-              <div>
-                <label className="text-sm text-slate-300 block mb-2">Custom Amount</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  placeholder="Enter amount"
-                />
+              <div className="mt-4">
+                <label className="text-sm text-gray-700 block mb-2">Custom Amount</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">₹</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className="w-full bg-gray-50 border border-gray-300 text-gray-900 rounded-xl py-3 pl-8 pr-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter amount"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="text-sm text-slate-300 block mb-2">Select Payment Method</label>
+              <div className="mt-4">
+                <label className="text-sm text-gray-700 block mb-2">Select Payment Method</label>
                 {methods.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">
-                    No saved methods. Add one to continue.
+                  <div className="rounded-xl border border-dashed border-gray-300 p-4 text-sm text-gray-500 bg-gray-50">
+                    No payment methods saved. Add one to continue.
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -616,22 +628,22 @@ export const CustomerWallet: React.FC = () => {
                         onClick={() => setSelectedMethodId(method.id)}
                         className={`w-full rounded-xl border p-3 text-left transition-colors ${
                           selectedMethodId === method.id
-                            ? 'border-pink-500 bg-pink-500/10'
-                            : 'border-slate-700 bg-slate-800 hover:border-slate-500'
+                            ? 'border-blue-500 bg-blue-50'
+                            : 'border-gray-200 bg-white hover:border-gray-300'
                         }`}
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center">
+                            <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
                               {methodIcon(method.type)}
                             </div>
                             <div>
-                              <p className="text-white text-sm font-semibold">{methodTitle(method)}</p>
-                              <p className="text-slate-400 text-xs">{methodSubtitle(method)}</p>
+                              <p className="text-gray-900 text-sm font-semibold">{methodTitle(method)}</p>
+                              <p className="text-gray-500 text-xs">{methodSubtitle(method)}</p>
                             </div>
                           </div>
                           {method.isDefault && (
-                            <span className="px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs">Default</span>
+                            <span className="px-2 py-1 rounded-full bg-green-100 text-green-700 text-xs font-medium">Default</span>
                           )}
                         </div>
                       </button>
@@ -643,60 +655,109 @@ export const CustomerWallet: React.FC = () => {
               <button
                 onClick={handleAddMoney}
                 disabled={processingTopup || !selectedMethodId || loading}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-pink-600 to-pink-500 text-white font-bold hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="w-full mt-4 py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
               >
                 {processingTopup && <Loader2 className="w-4 h-4 animate-spin" />}
-                {processingTopup ? 'Processing...' : `Add Money Rs ${Number(amount || 0).toLocaleString('en-IN')}`}
+                {processingTopup ? 'Processing...' : `Add ₹${Number(amount || 0).toLocaleString('en-IN')}`}
               </button>
+            </div>
+
+            {/* Transaction History */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">Recent Transactions</h3>
+                <button className="text-blue-600 text-sm font-medium hover:text-blue-700">View All</button>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                      <TrendingUp className="h-5 w-5 text-green-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">Money Added</p>
+                      <p className="text-xs text-gray-500">Today, 2:30 PM</p>
+                    </div>
+                  </div>
+                  <span className="text-green-600 font-semibold">+₹1,000</span>
+                </div>
+                
+                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                      <Clock className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">Service Payment</p>
+                      <p className="text-xs text-gray-500">Yesterday, 10:15 AM</p>
+                    </div>
+                  </div>
+                  <span className="text-red-600 font-semibold">-₹500</span>
+                </div>
+              </div>
             </div>
           </div>
 
           <div className="space-y-6">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+            {/* Saved Payment Methods */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200">
               <div className="flex items-center justify-between mb-4">
-                <h4 className="text-base font-semibold text-white">Saved Methods</h4>
+                <h4 className="text-base font-semibold text-gray-900">Payment Methods</h4>
                 <button
                   onClick={() => {
                     setError('');
                     setInfo('');
                     setShowAddPaymentModal(true);
                   }}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-pink-600 hover:bg-pink-700 text-white text-xs font-semibold"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  Add
+                  Add New
                 </button>
               </div>
 
               {loading ? (
-                <div className="text-sm text-slate-400">Loading methods...</div>
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+                  <span className="ml-2 text-sm text-gray-500">Loading methods...</span>
+                </div>
               ) : methods.length === 0 ? (
-                <p className="text-sm text-slate-400">No payment methods added yet.</p>
+                <div className="text-center py-8">
+                  <CreditCard className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-sm text-gray-500">No payment methods added yet.</p>
+                  <button
+                    onClick={() => setShowAddPaymentModal(true)}
+                    className="mt-3 text-blue-600 text-sm font-medium hover:text-blue-700"
+                  >
+                    Add your first payment method
+                  </button>
+                </div>
               ) : (
                 <div className="space-y-3">
                   {methods.map((method) => (
-                    <div key={method.id} className="rounded-xl border border-slate-800 bg-slate-800/60 p-3">
+                    <div key={method.id} className="rounded-xl border border-gray-200 bg-gray-50 p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div>
-                          <p className="text-sm font-semibold text-white flex items-center gap-1.5">
+                          <p className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
                             {methodTitle(method)}
-                            {method.isDefault && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
+                            {method.isDefault && <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />}
                           </p>
-                          <p className="text-xs text-slate-400 mt-0.5">{methodSubtitle(method)}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{methodSubtitle(method)}</p>
                         </div>
                       </div>
                       <div className="flex gap-2 mt-3">
                         {!method.isDefault && (
                           <button
                             onClick={() => handleSetDefault(method.id)}
-                            className="flex-1 text-xs py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100"
+                            className="flex-1 text-xs py-1.5 rounded-lg bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 transition-colors"
                           >
                             Set Default
                           </button>
                         )}
                         <button
                           onClick={() => handleDeleteMethod(method.id)}
-                          className="text-xs py-1.5 px-3 rounded-lg bg-red-600/20 hover:bg-red-600/30 text-red-300 inline-flex items-center gap-1"
+                          className="text-xs py-1.5 px-3 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 inline-flex items-center gap-1 transition-colors"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           Remove
@@ -707,28 +768,49 @@ export const CustomerWallet: React.FC = () => {
                 </div>
               )}
             </div>
+
+            {/* Quick Stats */}
+            <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-6 border border-gray-200">
+              <h4 className="text-base font-semibold text-gray-900 mb-4">Quick Stats</h4>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">Total Transactions</span>
+                  <span className="text-sm font-semibold text-gray-900">24</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">This Month</span>
+                  <span className="text-sm font-semibold text-green-600">+₹3,500</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">Saved Methods</span>
+                  <span className="text-sm font-semibold text-gray-900">{methods.length}</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
         {showAddPaymentModal && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-900 rounded-2xl p-6 max-w-lg w-full border border-slate-700 max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-bold text-white">Add Payment Method</h3>
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl p-6 max-w-lg w-full border border-gray-200 max-h-[90vh] overflow-y-auto shadow-xl">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-lg font-bold text-gray-900">Add Payment Method</h3>
                 <button
                   onClick={() => setShowAddPaymentModal(false)}
-                  className="text-slate-400 hover:text-white"
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
                 >
-                  X
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
               </div>
 
               <div className="mb-4">
-                <label className="text-sm font-medium text-slate-300 mb-2 block">Method Type</label>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">Method Type</label>
                 <select
                   value={newMethod.type}
                   onChange={(e) => setNewMethod({ ...newMethod, type: e.target.value as AddMethodForm['type'] })}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="UPI">UPI</option>
                   <option value="CARD">Credit / Debit Card</option>
@@ -739,11 +821,11 @@ export const CustomerWallet: React.FC = () => {
               {newMethod.type === 'UPI' && (
                 <div className="space-y-4">
                   <div>
-                    <label className="text-sm font-medium text-slate-300 mb-2 block">UPI App</label>
+                    <label className="text-sm font-medium text-gray-700 mb-2 block">UPI App</label>
                     <select
                       value={newMethod.upiProvider}
                       onChange={(e) => setNewMethod({ ...newMethod, upiProvider: e.target.value })}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     >
                       <option value="GPay">Google Pay</option>
                       <option value="PhonePe">PhonePe</option>
@@ -753,13 +835,13 @@ export const CustomerWallet: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-slate-300 mb-2 block">UPI ID</label>
+                    <label className="text-sm font-medium text-gray-700 mb-2 block">UPI ID</label>
                     <input
                       type="text"
                       value={newMethod.upiId}
                       onChange={(e) => setNewMethod({ ...newMethod, upiId: e.target.value })}
                       placeholder="yourname@okicici"
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
                 </div>
@@ -768,17 +850,17 @@ export const CustomerWallet: React.FC = () => {
               {newMethod.type === 'CARD' && (
                 <div className="space-y-4">
                   <div>
-                    <label className="text-sm font-medium text-slate-300 mb-2 block">Card Holder Name</label>
+                    <label className="text-sm font-medium text-gray-700 mb-2 block">Card Holder Name</label>
                     <input
                       type="text"
                       value={newMethod.cardName}
                       onChange={(e) => setNewMethod({ ...newMethod, cardName: e.target.value })}
                       placeholder="Name on card"
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-slate-300 mb-2 block">Card Number</label>
+                    <label className="text-sm font-medium text-gray-700 mb-2 block">Card Number</label>
                     <input
                       type="text"
                       value={newMethod.cardNumber}
@@ -786,12 +868,12 @@ export const CustomerWallet: React.FC = () => {
                       placeholder="1234 5678 9012 3456"
                       inputMode="numeric"
                       maxLength={23}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="text-sm font-medium text-slate-300 mb-2 block">Expiry Month</label>
+                      <label className="text-sm font-medium text-gray-700 mb-2 block">Month</label>
                       <input
                         type="text"
                         value={newMethod.expiryMonth}
@@ -799,23 +881,23 @@ export const CustomerWallet: React.FC = () => {
                         placeholder="MM"
                         inputMode="numeric"
                         maxLength={2}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                        className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
                     <div>
-                      <label className="text-sm font-medium text-slate-300 mb-2 block">Expiry Year</label>
+                      <label className="text-sm font-medium text-gray-700 mb-2 block">Year</label>
                       <input
                         type="text"
                         value={newMethod.expiryYear}
                         onChange={(e) => setNewMethod({ ...newMethod, expiryYear: e.target.value })}
-                        placeholder="YYYY or YY"
+                        placeholder="YY"
                         inputMode="numeric"
-                        maxLength={4}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                        maxLength={2}
+                        className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
                     <div>
-                      <label className="text-sm font-medium text-slate-300 mb-2 block">CVV</label>
+                      <label className="text-sm font-medium text-gray-700 mb-2 block">CVV</label>
                       <input
                         type="password"
                         value={newMethod.cardCvv}
@@ -823,7 +905,7 @@ export const CustomerWallet: React.FC = () => {
                         placeholder="123"
                         inputMode="numeric"
                         maxLength={4}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                        className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
                   </div>
@@ -833,66 +915,66 @@ export const CustomerWallet: React.FC = () => {
               {newMethod.type === 'NET_BANKING' && (
                 <div className="space-y-4">
                   <div>
-                    <label className="text-sm font-medium text-slate-300 mb-2 block">Bank Name</label>
+                    <label className="text-sm font-medium text-gray-700 mb-2 block">Bank Name</label>
                     <input
                       type="text"
                       value={newMethod.bankName}
                       onChange={(e) => setNewMethod({ ...newMethod, bankName: e.target.value })}
                       placeholder="State Bank of India"
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-slate-300 mb-2 block">Account Holder Name</label>
+                    <label className="text-sm font-medium text-gray-700 mb-2 block">Account Holder Name</label>
                     <input
                       type="text"
                       value={newMethod.accountHolderName}
                       onChange={(e) => setNewMethod({ ...newMethod, accountHolderName: e.target.value })}
                       placeholder="Account holder name"
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-slate-300 mb-2 block">Account Number</label>
+                    <label className="text-sm font-medium text-gray-700 mb-2 block">Account Number</label>
                     <input
                       type="text"
                       value={newMethod.accountNumber}
                       onChange={(e) => setNewMethod({ ...newMethod, accountNumber: e.target.value })}
                       placeholder="Account number"
                       inputMode="numeric"
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-slate-300 mb-2 block">Confirm Account Number</label>
+                    <label className="text-sm font-medium text-gray-700 mb-2 block">Confirm Account Number</label>
                     <input
                       type="text"
                       value={newMethod.confirmAccountNumber}
                       onChange={(e) => setNewMethod({ ...newMethod, confirmAccountNumber: e.target.value })}
                       placeholder="Re-enter account number"
                       inputMode="numeric"
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-slate-300 mb-2 block">IFSC Code (optional)</label>
+                    <label className="text-sm font-medium text-gray-700 mb-2 block">IFSC Code (optional)</label>
                     <input
                       type="text"
                       value={newMethod.ifsc}
                       onChange={(e) => setNewMethod({ ...newMethod, ifsc: e.target.value })}
                       placeholder="SBIN0000001"
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
                 </div>
               )}
 
-              <label className="flex items-center gap-2 mt-4 text-sm text-slate-300">
+              <label className="flex items-center gap-2 mt-6 text-sm text-gray-700">
                 <input
                   type="checkbox"
                   checked={newMethod.isDefault}
                   onChange={(e) => setNewMethod({ ...newMethod, isDefault: e.target.checked })}
-                  className="w-4 h-4"
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                 />
                 Set as default payment method
               </label>
@@ -900,14 +982,14 @@ export const CustomerWallet: React.FC = () => {
               <div className="flex gap-3 mt-6">
                 <button
                   onClick={() => setShowAddPaymentModal(false)}
-                  className="flex-1 py-2 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800"
+                  className="flex-1 py-2.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSavePaymentMethod}
                   disabled={savingMethod}
-                  className="flex-1 py-2 rounded-lg bg-pink-600 text-white font-medium hover:bg-pink-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
                 >
                   {savingMethod && <Loader2 className="w-4 h-4 animate-spin" />}
                   {savingMethod ? 'Saving...' : 'Save Method'}

@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
 import type { ProfileData } from '../types/Index';
-import { updateProviderProfile, removeProviderPhoto } from '../services/api_exports_new_fixed';
+import { updateProviderProfile, removeProviderPhoto } from '../services/api_exports';
 import { API_BASE } from '../App';
+import { fetchWithAuth, getStoredToken } from '../utils/authSession';
 
 // Define the shape of our provider profile state
 interface ProviderProfileState {
@@ -80,13 +81,10 @@ export const ProviderProfileProvider: React.FC<{ children: React.ReactNode }> = 
 
   // Fetch provider profile from API
   const fetchProfile = useCallback(async () => {
-    if (!state.isLoading) return; // Prevent multiple simultaneous fetches
-    
     dispatch({ type: 'SET_LOADING', payload: true });
     
     const userId = localStorage.getItem('userId');
-    const sessionId = localStorage.getItem('currentSessionId') || 'default';
-    const token = localStorage.getItem(`token_${userId}_${sessionId}`) || localStorage.getItem('token');
+    const token = getStoredToken();
     
     if (!token || !userId) {
       console.log('🔒 No token or userId, skipping profile fetch');
@@ -95,14 +93,12 @@ export const ProviderProfileProvider: React.FC<{ children: React.ReactNode }> = 
     }
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 second timeout
 
     try {
-      // Direct API call instead of using authService to avoid caching issues
-      const response = await fetch(`${API_BASE}/api/auth/me?t=${Date.now()}`, {
+      const response = await fetchWithAuth(`${API_BASE}/api/auth/me?t=${Date.now()}`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         signal: controller.signal
@@ -112,7 +108,23 @@ export const ProviderProfileProvider: React.FC<{ children: React.ReactNode }> = 
 
       if (!response.ok) {
         console.error('🔥 API Response Error:', response.status, response.statusText);
-        throw new Error(`HTTP error! status: ${response.status}`);
+        let apiMessage = `HTTP error! status: ${response.status}`;
+        try {
+          const errorPayload = await response.json();
+          if (errorPayload?.message) {
+            apiMessage = String(errorPayload.message);
+          }
+        } catch {
+          // Keep fallback message
+        }
+        if (response.status === 401) {
+          dispatch({
+            type: 'SET_ERROR',
+            payload: 'Session expired or invalid. Please log in again.'
+          });
+          return;
+        }
+        throw new Error(apiMessage);
       }
 
       const data = await response.json();
@@ -153,10 +165,13 @@ export const ProviderProfileProvider: React.FC<{ children: React.ReactNode }> = 
         console.log('⚠️ Profile fetch timed out - server may not be running');
         dispatch({ 
           type: 'SET_ERROR', 
-          payload: 'Server connection timed out. Please ensure the backend server is running on localhost:8086' 
+          payload: 'Server connection timed out. Please try again.' 
         });
       } else {
-        throw fetchError; // Re-throw other errors to be caught by outer catch
+        dispatch({
+          type: 'SET_ERROR',
+          payload: fetchError?.message || 'Failed to fetch provider profile'
+        });
       }
     }
   }, []);

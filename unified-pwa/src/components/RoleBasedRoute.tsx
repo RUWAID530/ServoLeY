@@ -10,7 +10,11 @@ const RoleBasedRoute: React.FC<RoleBasedRouteProps> = ({ children, allowedRoles 
   // Get user-specific token
   const userId = localStorage.getItem('userId');
   const sessionId = localStorage.getItem('currentSessionId') || 'default';
-  const token = localStorage.getItem(`token_${userId}_${sessionId}`) || localStorage.getItem('token');
+  const token =
+    (userId ? localStorage.getItem(`token_${userId}_${sessionId}`) : null) ||
+    (userId ? localStorage.getItem(`accessToken_${userId}_${sessionId}`) : null) ||
+    localStorage.getItem('accessToken') ||
+    localStorage.getItem('token');
   const adminToken = localStorage.getItem('adminToken');
   const storedUserType = localStorage.getItem('userType'); // <— add this
 

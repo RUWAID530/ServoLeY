@@ -115,6 +115,7 @@ model orders {
   serviceDate                    DateTime
   address                        String
   notes                          String?
+  expiresAt                      DateTime?
   cancelledBy                    String?
   cancelReason                   String?
   cancelledAt                    DateTime?
@@ -127,6 +128,8 @@ model orders {
   services                       services             @relation(fields: [serviceId], references: [id])
   reviews                        reviews?
   virtual_assignments            virtual_assignments?
+
+  @@index([status, expiresAt])
 }
 
 model otps {
@@ -251,6 +254,7 @@ model services {
   providerId      String
   name            String
   description     String
+  image           String?
   category        String
   price           Float
   basePrice       Float?
@@ -416,6 +420,7 @@ enum OrderStatus {
   COMPLETED
   CANCELLED
   REJECTED
+  EXPIRED
 }
 
 enum PaymentMethod {

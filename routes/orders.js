@@ -41,6 +41,40 @@ const ensureOrderAccess = (order, user) => {
   return order.customerId === user.id || order.providerId === user.id;
 };
 
+const getOrderRequestExpirySeconds = () => {
+  const raw = Number(process.env.ORDER_REQUEST_TIMEOUT_SECONDS || 30);
+  if (Number.isNaN(raw) || raw <= 0) return 30;
+  return Math.min(Math.max(raw, 5), 300);
+};
+
+const getCustomerName = (user) => {
+  if (!user) return 'Customer';
+  const profile = user.profiles || null;
+  const fullName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim();
+  return fullName || user.email || user.phone || 'Customer';
+};
+
+const scheduleOrderExpiry = (orderId, ttlSeconds) => {
+  const delayMs = ttlSeconds * 1000;
+  setTimeout(async () => {
+    try {
+      await prisma.orders.updateMany({
+        where: {
+          id: orderId,
+          status: 'PENDING',
+          expiresAt: { lte: new Date() }
+        },
+        data: {
+          status: 'EXPIRED',
+          updatedAt: new Date()
+        }
+      });
+    } catch (error) {
+      console.error('Order expiry failed:', error);
+    }
+  }, delayMs);
+};
+
 // Create booking (Customer)
 router.post(
   '/',
@@ -161,6 +195,9 @@ router.post(
         ? `${cleanNotes}${cleanNotes ? '\n\n' : ''}Issue photos:\n${uploadedIssuePhotos.map((url) => `- ${url}`).join('\n')}`
         : cleanNotes;
 
+      const expirySeconds = getOrderRequestExpirySeconds();
+      const expiresAt = new Date(Date.now() + expirySeconds * 1000);
+
       const order = await prisma.$transaction(
         async (tx) => {
           const existingBooking = await tx.orders.findFirst({
@@ -192,12 +229,38 @@ router.post(
               serviceDate: scheduledAt,
               address,
               notes: notesWithIssuePhotos || null,
-              updatedAt: new Date()
-            }
-          });
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+               expiresAt,
+               updatedAt: new Date()
+             }
+           });
+         },
+         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
       );
+
+      scheduleOrderExpiry(order.id, expirySeconds);
+
+      try {
+        const io = req.app?.get?.('io');
+        const customerUser = await prisma.users.findUnique({
+          where: { id: req.user.id },
+          include: { profiles: true }
+        });
+        const orderPayload = {
+          id: order.id,
+          service: service?.name || 'Service Request',
+          customerName: getCustomerName(customerUser),
+          location: address,
+          price: Number(service?.price || order.totalAmount || 0),
+          countdown: expirySeconds,
+          providerId: providerUserId,
+          expiresAt: expiresAt.toISOString()
+        };
+        if (io && providerUserId) {
+          io.to(`provider_${providerUserId}`).emit('new_service_request', orderPayload);
+        }
+      } catch (emitError) {
+        console.error('Failed to emit new service request:', emitError);
+      }
 
       return res.status(201).json({
         success: true,

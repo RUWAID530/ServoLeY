@@ -5,9 +5,17 @@ interface NavigationProps {
   onNavigate: (page: 'home' | 'services' | 'wallet' | 'support' | 'profile') => void;
   onProviderRegister?: () => void;
   onCustomerService?: () => void;
+  variant?: 'dark' | 'light';
 }
 
-export default function Navigation({ active, onNavigate, onProviderRegister, onCustomerService }: NavigationProps) {
+export default function Navigation({
+  active,
+  onNavigate,
+  onProviderRegister,
+  onCustomerService,
+  variant = 'dark'
+}: NavigationProps) {
+  const isLight = variant === 'light';
   const items = [
     { id: 'home' as const, label: 'Home', icon: Home },
     { id: 'services' as const, label: 'Services', icon: List },
@@ -17,7 +25,11 @@ export default function Navigation({ active, onNavigate, onProviderRegister, onC
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-gray-800 z-50">
+    <nav
+      className={`fixed bottom-0 left-0 right-0 border-t z-50 ${
+        isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-gray-800'
+      }`}
+    >
       <div className="max-w-7xl mx-auto grid grid-cols-5 items-center px-2 py-2 sm:px-4 sm:py-3">
         {items.map((item) => {
           const Icon = item.icon;
@@ -29,8 +41,12 @@ export default function Navigation({ active, onNavigate, onProviderRegister, onC
               onClick={() => onNavigate(item.id)}
               className={`flex min-w-0 flex-col items-center gap-1 rounded-lg py-2 transition-all ${
                 isActive
-                  ? 'bg-purple-600 text-white shadow-lg'
-                  : 'text-gray-300 hover:bg-slate-800'
+                  ? isLight
+                    ? 'bg-blue-50 text-blue-600 shadow-sm'
+                    : 'bg-purple-600 text-white shadow-lg'
+                  : isLight
+                    ? 'text-slate-400 hover:bg-slate-50'
+                    : 'text-gray-300 hover:bg-slate-800'
               }`}
             >
               <Icon className="h-5 w-5" />

@@ -1,66 +1,112 @@
-import { SlidersHorizontal, Search, MapPin, Star, Clock, Store, User } from 'lucide-react';
-import Navigation from '../components/Navigation';
-import CustomerHeader from '../components/CustomerHeader';
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  ArrowLeft,
+  Clock3,
+  Headset,
+  Home,
+  Plus,
+  Search,
+  User,
+  Wallet,
+  Wrench
+} from 'lucide-react';
 import { getServices } from '../services/api_new';
-import { useUserImage } from '../hooks/useUserImage';
-import { io } from 'socket.io-client';
+import { resolveMediaUrl } from '../utils/media';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8086';
-const SERVICE_REFRESH_INTERVAL_MS = 30000;
+interface ServiceCard {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  duration: string;
+  price: number;
+  image: string;
+  raw: any;
+}
 
-const getProviderRecord = (service: any) => service?.providers || service?.provider || null;
+const fallbackCards: ServiceCard[] = [
+  {
+    id: 'fallback-1',
+    name: 'Deep Kitchen Cleaning',
+    category: 'Cleaning',
+    description: 'Specialized kitchen hygiene and surface care.',
+    duration: '2 hrs',
+    price: 49,
+    image: 'https://images.unsplash.com/photo-1556911220-bff31c812dba?auto=format&fit=crop&w=900&q=80',
+    raw: {}
+  },
+  {
+    id: 'fallback-2',
+    name: 'Bathroom Disinfection',
+    category: 'Cleaning',
+    description: 'Deep sanitization for all bathroom surfaces.',
+    duration: '1.5 hrs',
+    price: 35,
+    image: 'https://images.unsplash.com/photo-1620626011761-996317b8d101?auto=format&fit=crop&w=900&q=80',
+    raw: {}
+  },
+  {
+    id: 'fallback-3',
+    name: 'Full House Deep Cleaning',
+    category: 'Cleaning',
+    description: 'Complete home deep cleaning package.',
+    duration: '5-6 hrs',
+    price: 149,
+    image: 'https://images.unsplash.com/photo-1616594039964-3f4d6e9f003d?auto=format&fit=crop&w=900&q=80',
+    raw: {}
+  }
+];
 
-const getProviderName = (service: any) => {
-  const provider = getProviderRecord(service);
-  const firstName = provider?.users?.profiles?.firstName;
-  const lastName = provider?.users?.profiles?.lastName;
-  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+const normalizeText = (value: string) => (value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-  return fullName || provider?.businessName || service?.providerName || service?.provider || 'Provider';
-};
+const deriveDuration = (service: any, index: number) => {
+  const raw = service?.duration || service?.estimatedDuration || service?.timeRequired || service?.time;
 
-const getProviderLocation = (_service: any) => 'Tirunelveli';
-
-const getProviderType = (service: any) => {
-  const provider = getProviderRecord(service);
-  const providerType = (provider?.providerType || '').toString().toLowerCase();
-  return providerType === 'store' ? 'shop' : 'freelancer';
-};
-
-const getProviderTypeBadge = (type: string) => {
-  if (type === 'shop') {
-    return {
-      bg: 'bg-blue-100',
-      text: 'text-blue-900',
-      icon: <Store className="w-3 h-3" />,
-      label: 'Store'
-    };
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    return `${raw} hrs`;
   }
 
-  return {
-    bg: 'bg-green-100',
-    text: 'text-green-900',
-    icon: <User className="w-3 h-3" />,
-    label: 'Freelancer'
-  };
+  if (typeof raw === 'string' && raw.trim()) {
+    return raw;
+  }
+
+  const name = `${service?.name || service?.title || ''}`.toLowerCase();
+  if (name.includes('bath')) return '1.5 hrs';
+  if (name.includes('kitchen')) return '2 hrs';
+  if (name.includes('full') || name.includes('house')) return '5-6 hrs';
+
+  const durations = ['2 hrs', '1.5 hrs', '5-6 hrs', '3 hrs'];
+  return durations[index % durations.length];
+};
+
+const derivePrice = (service: any, index: number) => {
+  const rawPrice = Number(service?.price || service?.amount || 0);
+  if (Number.isFinite(rawPrice) && rawPrice > 0) {
+    if (rawPrice > 1000) return Math.round(rawPrice / 80);
+    return Math.round(rawPrice);
+  }
+
+  const prices = [49, 35, 149, 79, 95, 120];
+  return prices[index % prices.length];
 };
 
 export default function CustomerServicesDashboard() {
-  const [active, setActive] = useState<'home' | 'services' | 'wallet' | 'support' | 'profile'>('services');
-  const [services, setServices] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const userImage = useUserImage();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [loading, setLoading] = useState(true);
+  const [services, setServices] = useState<any[]>([]);
+
+  const queryCategory = new URLSearchParams(location.search).get('category') || 'Cleaning';
 
   const fetchServices = useCallback(async () => {
     try {
-      const servicesData = await getServices();
-      setServices(Array.isArray(servicesData) ? servicesData : []);
+      setLoading(true);
+      const result = await getServices();
+      setServices(Array.isArray(result) ? result : []);
     } catch (error) {
-      console.error('Error fetching services:', error);
+      console.error('Failed to load services:', error);
+      setServices([]);
     } finally {
       setLoading(false);
     }
@@ -70,269 +116,170 @@ export default function CustomerServicesDashboard() {
     fetchServices();
   }, [fetchServices]);
 
-  useEffect(() => {
-    const refreshOnFocus = () => {
-      if (!document.hidden) fetchServices();
-    };
+  const cards = useMemo(() => {
+    const mapped = services.map((service: any, index: number): ServiceCard => {
+      const image = resolveMediaUrl(service?.image, '') || fallbackCards[index % fallbackCards.length].image;
 
-    window.addEventListener('focus', refreshOnFocus);
-    document.addEventListener('visibilitychange', refreshOnFocus);
-    const intervalId = window.setInterval(fetchServices, SERVICE_REFRESH_INTERVAL_MS);
-
-    return () => {
-      window.removeEventListener('focus', refreshOnFocus);
-      document.removeEventListener('visibilitychange', refreshOnFocus);
-      window.clearInterval(intervalId);
-    };
-  }, [fetchServices]);
-
-  useEffect(() => {
-    const socket = io(API_BASE, { transports: ['websocket'] });
-    socket.emit('services:subscribe');
-    socket.on('services:updated', fetchServices);
-
-    return () => {
-      socket.off('services:updated', fetchServices);
-      socket.disconnect();
-    };
-  }, [fetchServices]);
-
-  const handleNavigate = (page: typeof active) => {
-    setActive(page);
-
-    switch (page) {
-      case 'home':
-        navigate('/customer/home');
-        break;
-      case 'services':
-        navigate('/customer/services');
-        break;
-      case 'wallet':
-        navigate('/customer/wallet');
-        break;
-      case 'support':
-        navigate('/customer/support/dashboard');
-        break;
-      case 'profile':
-        navigate('/customer/profile');
-        break;
-    }
-  };
-
-  const filteredServices = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return services;
-
-    return services.filter((service: any) => {
-      const serviceName = (service?.name || service?.title || '').toLowerCase();
-      const providerName = getProviderName(service).toLowerCase();
-      const category = (service?.category || '').toLowerCase();
-      const description = (service?.description || '').toLowerCase();
-
-      return (
-        serviceName.includes(query) ||
-        providerName.includes(query) ||
-        category.includes(query) ||
-        description.includes(query)
-      );
+      return {
+        id: String(service?.id || `service-${index}`),
+        name: service?.name || service?.title || fallbackCards[index % fallbackCards.length].name,
+        category: service?.category || fallbackCards[index % fallbackCards.length].category,
+        description:
+          service?.description || fallbackCards[index % fallbackCards.length].description,
+        duration: deriveDuration(service, index),
+        price: derivePrice(service, index),
+        image,
+        raw: service
+      };
     });
-  }, [services, searchQuery]);
+
+    const targetCategory = normalizeText(queryCategory);
+    const categoryMatches = mapped.filter(
+      (card) => normalizeText(card.category).includes(targetCategory) || normalizeText(card.name).includes(targetCategory)
+    );
+
+    if (categoryMatches.length > 0) return categoryMatches;
+    if (mapped.length > 0) return mapped;
+    return fallbackCards;
+  }, [services, queryCategory]);
+
+  const headingCategory = queryCategory.toLowerCase().includes('clean') ? 'Deep Cleaning' : queryCategory;
 
   return (
-    <div className="min-h-screen bg-slate-950">
-      <CustomerHeader userImage={userImage} />
-      <Navigation active={active} onNavigate={handleNavigate} onCustomerService={() => {}} />
-
-      <div className="pb-24">
-        <div className="bg-gradient-to-br from-pink-600 via-pink-500 to-violet-600 px-6 py-12">
-          <div className="max-w-7xl mx-auto">
-            <div className="flex items-center justify-between mb-8">
-              <div>
-                <p className="text-pink-100 mb-2">/ Services</p>
-                <h1 className="text-4xl font-bold text-white">Service Listings</h1>
-              </div>
-              <button className="bg-pink-100 hover:bg-white text-slate-900 px-6 py-3 rounded-full font-medium flex items-center gap-2 transition-colors">
-                <SlidersHorizontal className="w-5 h-5" />
-                Filters
-              </button>
-            </div>
-
-            <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800">
-              <div className="relative">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search for services, providers, or categories..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-400 focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/20 transition-all"
-                />
-              </div>
-            </div>
+    <div className="min-h-screen bg-[#f4f5f7] pb-24 text-slate-900">
+      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white">
+        <div className="mx-auto flex h-20 w-full max-w-5xl items-center justify-between px-4">
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full text-slate-700 hover:bg-slate-100"
+              aria-label="Back"
+            >
+              <ArrowLeft className="h-7 w-7" />
+            </button>
+            <h1 className="text-2xl font-bold sm:text-[2rem]">Select Service</h1>
           </div>
+
+          <button
+            type="button"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-slate-700 hover:bg-slate-100"
+            aria-label="Search"
+          >
+            <Search className="h-7 w-7" />
+          </button>
         </div>
+      </header>
 
-        <div className="max-w-7xl mx-auto px-6 py-12">
-          <div className="flex items-center justify-between mb-8">
-            <h2 className="text-white text-2xl font-bold">
-              {searchQuery ? `Search results for "${searchQuery}"` : 'Top providers near you'}
-            </h2>
-            <span className="text-white opacity-70">
-              {filteredServices.length} {filteredServices.length === 1 ? 'result' : 'results'}
-            </span>
-          </div>
+      <main className="mx-auto w-full max-w-5xl px-4 py-6">
+        <section>
+          <h2 className="text-3xl font-bold text-slate-900 sm:text-[2.3rem]">{headingCategory} Services</h2>
+          <p className="mt-2 text-lg text-slate-500 sm:text-2xl">
+            Specialized cleaning for every corner of your home.
+          </p>
+        </section>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {loading ? (
-              <div className="lg:col-span-3 text-center py-12">
-                <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-pink-500" />
-                <p className="mt-4 text-white">Loading services...</p>
-              </div>
-            ) : filteredServices.length > 0 ? (
-              filteredServices.map((service: any) => {
-                const provider = getProviderRecord(service);
-                const providerType = getProviderType(service);
-                const providerBadge = getProviderTypeBadge(providerType);
-                const providerName = getProviderName(service);
-                const providerLocation = getProviderLocation(service);
-                const providerRating = Number(provider?.rating || service?.rating || 0);
-                const ratingText = providerRating > 0 ? providerRating.toFixed(1) : 'New';
-                const providerReviewCount = provider?._count?.reviews;
-                const completedJobs = Number(provider?.totalOrders || service?.completedJobs || 0);
-                const providerId = provider?.id || service?.providerId || 'provider';
-                const providerAvatar = provider?.users?.profiles?.avatar || service?.providerImage;
-                const servicePrice = Number(service?.price);
+        <section className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+          {loading
+            ? [1, 2, 3].map((item) => (
+                <div key={item} className="animate-pulse rounded-3xl border border-slate-200 bg-white shadow-sm">
+                  <div className="h-48 w-full rounded-t-3xl bg-slate-200" />
+                  <div className="space-y-3 p-5">
+                    <div className="h-6 w-3/4 rounded bg-slate-200" />
+                    <div className="h-4 w-1/2 rounded bg-slate-200" />
+                    <div className="h-10 w-full rounded bg-slate-200" />
+                  </div>
+                </div>
+              ))
+            : cards.map((card, index) => (
+                <article
+                  key={card.id}
+                  className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
+                >
+                  <div className="relative">
+                    <img src={card.image} alt={card.name} className="h-48 w-full object-cover" />
+                    {index === 0 && (
+                      <span className="absolute left-4 top-4 rounded-xl bg-white px-3 py-1 text-sm font-semibold tracking-wide text-[#2563eb]">
+                        BEST SELLER
+                      </span>
+                    )}
+                  </div>
 
-                return (
-                  <div
-                    key={service?.id || `${providerId}-${service?.name || service?.title || 'service'}`}
-                    className="bg-slate-900 rounded-2xl overflow-hidden border-2 border-slate-800 hover:border-pink-500 transition-all group"
-                  >
-                    <div className="relative">
-                      {service?.image ? (
-                        <img
-                          src={service.image}
-                          alt={service?.name || service?.title || 'Service'}
-                          className="w-full h-52 object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-52 bg-gradient-to-br from-slate-700 to-slate-900" />
-                      )}
+                  <div className="p-5">
+                    <h3 className="min-h-[4.5rem] text-[2rem] font-semibold leading-tight text-slate-900 sm:text-[1.95rem]">
+                      {card.name}
+                    </h3>
 
-                      <div className={`absolute top-3 left-3 ${providerBadge.bg} ${providerBadge.text} px-2 py-1 rounded-full text-xs font-semibold flex items-center gap-1`}>
-                        {providerBadge.icon}
-                        {providerBadge.label}
-                      </div>
+                    <div className="mt-2 flex items-center gap-2 text-slate-400">
+                      <Clock3 className="h-4 w-4" />
+                      <span className="text-lg sm:text-xl">{card.duration}</span>
                     </div>
 
-                    <div className="p-6">
-                      <div className="flex items-start gap-3 mb-4">
-                        {providerAvatar ? (
-                          <img
-                            src={providerAvatar}
-                            alt={providerName}
-                            className="w-12 h-12 rounded-full object-cover border-2 border-pink-500"
-                          />
-                        ) : (
-                          <div className="w-12 h-12 rounded-full bg-slate-700 border-2 border-pink-500 flex items-center justify-center">
-                            <User className="w-5 h-5 text-slate-300" />
-                          </div>
-                        )}
-
-                        <div className="flex-1">
-                          <h3 className="text-white font-bold text-lg mb-1">{service?.name || service?.title || 'Service'}</h3>
-                          <p className="text-white text-sm opacity-80 mb-2">
-                            {providerName} • {providerLocation}
-                          </p>
-
-                          <div className="bg-slate-800/50 rounded-lg p-3 mb-2">
-                            <div className="flex items-center gap-2 mb-2">
-                              <div className="w-6 h-6 rounded-full bg-pink-500 flex items-center justify-center">
-                                <User className="w-3 h-3 text-white" />
-                              </div>
-                              <div>
-                                <p className="text-white font-semibold text-sm">{providerName}</p>
-                                <div className="flex items-center gap-1">
-                                  <Star className="w-3 h-3 text-yellow-400 fill-current" />
-                                  <span className="text-white text-sm">{ratingText}</span>
-                                  <span className="text-gray-400 text-sm">
-                                    ({typeof providerReviewCount === 'number' ? `${providerReviewCount} reviews` : `${completedJobs} jobs`})
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                              <div className="flex items-center gap-1">
-                                <MapPin className="w-3 h-3 text-gray-400" />
-                                <span className="text-gray-300">{providerLocation}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <Clock className="w-3 h-3 text-gray-400" />
-                                <span className="text-gray-300">{provider?.isOnline ? 'Online now' : 'Currently offline'}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span className="text-gray-400">Category:</span>
-                                <span className="text-gray-300">{provider?.category || service?.category || 'General'}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span className="text-gray-400">Completed:</span>
-                                <span className="text-gray-300">{completedJobs}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2 mb-4">
-                        <span className="bg-slate-800 text-white text-sm px-3 py-1 rounded-full">
-                          {Number.isFinite(servicePrice) ? `Rs ${servicePrice.toLocaleString('en-IN')}` : 'Price on request'}
-                        </span>
-                        <span className="bg-slate-800 text-white text-sm px-3 py-1 rounded-full">
-                          {service?.category || 'Service'}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <button
-                          onClick={() => navigate('/customer/bookings', { state: { service } })}
-                          className="flex-1 bg-violet-600 hover:bg-violet-700 text-white py-3 rounded-full font-semibold transition-colors mr-2"
-                        >
-                          Book Now
-                        </button>
-                        <button
-                          onClick={() => navigate('/customer/provider-details', { state: { service } })}
-                          className="bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-full font-semibold transition-colors"
-                        >
-                          View Details
-                        </button>
-                      </div>
+                    <div className="mt-4 flex items-end justify-between">
+                      <p className="text-[2.2rem] font-bold text-[#2563eb] sm:text-[2rem]">${card.price}</p>
+                      <button
+                        type="button"
+                        onClick={() => navigate('/customer/bookings', { state: { service: card.raw } })}
+                        className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-[#2563eb] text-white shadow-lg hover:bg-[#1d4ed8]"
+                        aria-label={`Add ${card.name}`}
+                      >
+                        <Plus className="h-7 w-7" />
+                      </button>
                     </div>
                   </div>
-                );
-              })
-            ) : (
-              <div className="lg:col-span-3 text-center py-12">
-                <p className="text-white text-lg">
-                  {searchQuery ? `No services found for "${searchQuery}"` : 'No services available at the moment.'}
-                </p>
-                <p className="text-white opacity-70 text-sm mt-2">
-                  {searchQuery ? 'Try different keywords or browse all services.' : 'Check back later for new service listings.'}
-                </p>
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="mt-4 bg-violet-600 hover:bg-violet-700 text-white px-6 py-2 rounded-full font-medium transition-colors"
-                  >
-                    Clear Search
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
+                </article>
+              ))}
+        </section>
+      </main>
+
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur">
+        <div className="mx-auto grid max-w-5xl grid-cols-5 px-2 py-2">
+          <button
+            type="button"
+            onClick={() => navigate('/customer/home')}
+            className="flex flex-col items-center gap-1 py-2 text-slate-400"
+          >
+            <Home className="h-6 w-6" />
+            <span className="text-xs font-semibold tracking-[0.12em]">HOME</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/customer/services')}
+            className="flex flex-col items-center gap-1 py-2 text-[#2563eb]"
+          >
+            <Wrench className="h-6 w-6" />
+            <span className="text-xs font-semibold tracking-[0.12em]">SERVICES</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/customer/wallet')}
+            className="flex flex-col items-center gap-1 py-2 text-slate-400"
+          >
+            <Wallet className="h-6 w-6" />
+            <span className="text-xs font-semibold tracking-[0.12em]">WALLET</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/customer/support/dashboard')}
+            className="flex flex-col items-center gap-1 py-2 text-slate-400"
+          >
+            <Headset className="h-6 w-6" />
+            <span className="text-xs font-semibold tracking-[0.12em]">SUPPORT</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/customer/profile')}
+            className="flex flex-col items-center gap-1 py-2 text-slate-400"
+          >
+            <User className="h-6 w-6" />
+            <span className="text-xs font-semibold tracking-[0.12em]">PROFILE</span>
+          </button>
         </div>
-      </div>
+      </nav>
     </div>
   );
 }
-

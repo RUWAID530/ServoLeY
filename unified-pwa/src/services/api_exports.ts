@@ -1,4 +1,4 @@
-import { apiServiceWithFallback } from './api_new';
+import { api, apiServiceWithFallback } from './api_new';
 
 // All functions here call the real backend only.
 // No mock or offline placeholder data is returned.
@@ -33,7 +33,7 @@ export const uploadImage = (file: File) => {
     })
     .catch(error => ({ 
       success: false, 
-      message: error.message,
+      message: error.response?.data?.message || error.message,
       data: null 
     }));
 };

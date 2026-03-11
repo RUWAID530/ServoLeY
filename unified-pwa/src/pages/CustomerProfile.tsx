@@ -1,5 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronRight, Camera } from 'lucide-react';
+import {
+  ArrowLeft,
+  Calendar,
+  Camera,
+  ChevronRight,
+  Gift,
+  MapPin,
+  Settings,
+  Shield,
+  Star,
+  User,
+  Wallet
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Navigation from '../components/Navigation';
 import { PasswordModal, AddressModal } from '../components/ProfileModals';
@@ -239,6 +251,8 @@ const CustomerProfile: React.FC = () => {
   const [securityLoading, setSecurityLoading] = useState(true);
   const [securityNotice, setSecurityNotice] = useState('');
   const [showSessionsModal, setShowSessionsModal] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const savedAddresses = React.useMemo(() => {
     if (!userData) return [];
 
@@ -323,6 +337,17 @@ const CustomerProfile: React.FC = () => {
     };
 
     fetchUserData();
+  }, []);
+
+  useEffect(() => {
+    const hash = window.location.hash.replace('#', '');
+    if (!hash) return;
+    if (hash === 'security-settings' || hash === 'personal-details') {
+      setShowAdvanced(true);
+      window.setTimeout(() => {
+        document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 120);
+    }
   }, []);
 
   useEffect(() => {
@@ -725,6 +750,86 @@ const CustomerProfile: React.FC = () => {
     window.open('/privacy-policy', '_blank');
   };
 
+  const handleDeleteAccount = async () => {
+    const firstConfirm = window.confirm('This will permanently deactivate your account and remove your personal details. Continue?');
+    if (!firstConfirm) return;
+
+    const confirmText = window.prompt('Type DELETE to confirm account deletion');
+    if (String(confirmText || '').trim() !== 'DELETE') {
+      alert('Account deletion cancelled. Confirmation text did not match.');
+      return;
+    }
+
+    try {
+      setDeletingAccount(true);
+      const token = getAuthToken();
+      if (!token) {
+        throw new Error('Please login again and try deleting your account.');
+      }
+
+      const response = await fetchWithFallback('/api/auth/me', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ confirmText: 'DELETE' })
+      });
+
+      const result = await parseJsonSafe(response);
+      if (!response.ok || !result?.success) {
+        const validationMessage = Array.isArray(result?.errors) && result.errors.length > 0
+          ? String(result.errors[0]?.msg || '')
+          : '';
+        throw new Error(validationMessage || result?.message || 'Failed to delete account');
+      }
+
+      localStorage.clear();
+      alert('Your account has been deleted successfully.');
+      navigate('/auth');
+    } catch (error: any) {
+      console.error('Error deleting account:', error);
+      alert(error?.message || 'Failed to delete account. Please try again.');
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
+  const displayName = `${userData?.firstName || ''} ${userData?.lastName || ''}`.trim() || 'Customer';
+  const locationLabel = [userData?.city, userData?.state, userData?.country]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(', ') || 'Location not set';
+  const bookingCount = Number(userData?.bookingCount ?? 0);
+  const ratingValue = Number(userData?.rating ?? 4.9);
+  const membershipLabel = String(userData?.membership || 'Elite').toUpperCase();
+
+  const openAdvancedSection = (sectionId?: string) => {
+    setShowAdvanced(true);
+    if (!sectionId) return;
+    window.setTimeout(() => {
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+  };
+
+  const handleOpenSettings = () => {
+    navigate('/customer/setting');
+  };
+
+  const handleGenerateReferral = async () => {
+    const referralLink = `${window.location.origin}/ref/${userData?.id || 'customer'}`;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(referralLink);
+        alert('Referral link copied to clipboard.');
+        return;
+      }
+    } catch {
+      // fall through to alert
+    }
+    alert(`Referral link: ${referralLink}`);
+  };
+
   if (loading) {
     return (
       <div className="pb-32 flex justify-center items-center h-64">
@@ -750,29 +855,53 @@ const CustomerProfile: React.FC = () => {
   }
 
   return (
-    <div className="pb-32">
-      {/* Profile Header Gradient */}
-      <div className="bg-gradient-to-r from-purple-500 to-pink-500 p-6 -mt-1">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 max-w-5xl mx-auto">
-          <div className="flex items-center gap-4">
+    <div className="min-h-screen bg-slate-50 pb-32">
+      <div className="bg-gradient-to-b from-indigo-600 via-blue-600 to-indigo-700 pt-6 pb-24">
+        <div className="max-w-md mx-auto px-4">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => navigate(-1)}
+              className="h-11 w-11 rounded-full bg-white/15 text-white flex items-center justify-center hover:bg-white/25 transition"
+              aria-label="Go back"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <p className="text-xs font-semibold tracking-[0.32em] text-white/70">EXECUTIVE PROFILE</p>
+            <button
+              onClick={handleOpenSettings}
+              className="h-11 w-11 rounded-full bg-white/15 text-white flex items-center justify-center hover:bg-white/25 transition"
+              aria-label="Open settings"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="mt-10 flex flex-col items-center text-center">
             <div className="relative">
-              <img 
-                src={userData?.avatar || "https://picsum.photos/seed/user123/100/100.jpg"} 
-                alt="Profile" 
-                className="w-16 h-16 rounded-full border-4 border-white/20 object-cover cursor-pointer"
+              <div className="h-28 w-28 rounded-full bg-white/10 p-1 shadow-lg">
+                <div className="h-full w-full rounded-full border-4 border-white/30 overflow-hidden bg-white/10">
+                  <img
+                    src={userData?.avatar || "https://picsum.photos/seed/user123/120/120.jpg"}
+                    alt="Profile"
+                    className="h-full w-full object-cover cursor-pointer"
+                    onClick={() => document.getElementById('profile-photo-upload')?.click()}
+                  />
+                </div>
+              </div>
+              <button
                 onClick={() => document.getElementById('profile-photo-upload')?.click()}
-              />
-              <button 
-                onClick={() => document.getElementById('profile-photo-upload')?.click()}
-                className="absolute bottom-0 right-0 w-6 h-6 bg-purple-600 hover:bg-purple-700 rounded-full flex items-center justify-center text-white border-2 border-white/30 transition-colors"
+                className="absolute -bottom-1 left-2 h-9 w-9 rounded-full bg-white text-indigo-600 shadow flex items-center justify-center"
                 disabled={uploading}
               >
                 {uploading ? (
-                  <div className="w-3 h-3 border-2 border-white/50 border-t-transparent animate-spin"></div>
+                  <div className="w-4 h-4 border-2 border-indigo-300 border-t-transparent animate-spin"></div>
                 ) : (
-                  <Camera size={14} />
+                  <Camera size={16} />
                 )}
               </button>
+              <span className="absolute -bottom-1 -right-3 rounded-full bg-amber-400 px-3 py-1 text-[10px] font-bold text-slate-900 shadow">
+                {membershipLabel}
+              </span>
               <input
                 id="profile-photo-upload"
                 type="file"
@@ -781,35 +910,141 @@ const CustomerProfile: React.FC = () => {
                 className="hidden"
               />
             </div>
-            <div>
-              <h1 className="text-xl font-bold text-white">{userData.firstName} {userData.lastName}</h1>
-              <p className="text-white/80 text-sm">{userData.phone} | {userData.email}</p>
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <button 
-              onClick={handleEditPersonal}
-              className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white text-sm rounded-full backdrop-blur-sm transition-colors border border-white/30"
-            >
-              Edit Profile
-            </button>
-            <button 
-              onClick={handleChangePassword}
-              className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white text-sm rounded-full backdrop-blur-sm transition-colors border border-white/30"
-            >
-              Change Password
-            </button>
+
+            <h1 className="mt-4 text-2xl font-semibold text-white">{displayName}</h1>
+            <p className="mt-1 flex items-center gap-1 text-sm text-white/80">
+              <MapPin className="w-4 h-4" />
+              {locationLabel}
+            </p>
           </div>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-4 mt-6 space-y-6">
+      <div className="-mt-12 max-w-md mx-auto px-4 space-y-6">
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-2xl bg-white border border-slate-100 px-3 py-4 text-center shadow-sm">
+            <div className="text-xl font-semibold text-indigo-600">{bookingCount}</div>
+            <div className="text-[11px] uppercase tracking-[0.2em] text-slate-400 mt-1">Bookings</div>
+          </div>
+          <div className="rounded-2xl bg-white border border-slate-100 px-3 py-4 text-center shadow-sm">
+            <div className="flex items-center justify-center gap-1 text-indigo-600">
+              <span className="text-xl font-semibold">{ratingValue.toFixed(1)}</span>
+              <Star className="w-3.5 h-3.5 text-amber-400" />
+            </div>
+            <div className="text-[11px] uppercase tracking-[0.2em] text-slate-400 mt-1">Rating</div>
+          </div>
+          <div className="rounded-2xl bg-white border border-slate-100 px-3 py-4 text-center shadow-sm">
+            <div className="text-xl font-semibold text-indigo-600">Rs 0</div>
+            <div className="text-[11px] uppercase tracking-[0.2em] text-slate-400 mt-1">Wallet</div>
+          </div>
+        </div>
+
+        <section className="bg-white rounded-3xl border border-slate-100 px-4 py-5 shadow-sm">
+          <p className="text-[11px] font-semibold tracking-[0.25em] text-slate-400">ACCOUNT SETTINGS</p>
+          <div className="mt-4 space-y-3">
+            <button
+              onClick={() => {
+                setEditingPersonal(true);
+                openAdvancedSection('personal-details');
+              }}
+              className="w-full flex items-center justify-between rounded-2xl bg-slate-50/60 border border-slate-100 px-4 py-3 text-left hover:bg-slate-50"
+            >
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                  <User className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Personal Info</p>
+                  <p className="text-xs text-slate-500">Manage your private details</p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-slate-400" />
+            </button>
+            <button
+              onClick={() => navigate('/customer/upcoming-bookings')}
+              className="w-full flex items-center justify-between rounded-2xl bg-slate-50/60 border border-slate-100 px-4 py-3 text-left hover:bg-slate-50"
+            >
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Calendar className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">My Bookings</p>
+                  <p className="text-xs text-slate-500">History and upcoming services</p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-slate-400" />
+            </button>
+            <button
+              onClick={() => navigate('/customer/wallet')}
+              className="w-full flex items-center justify-between rounded-2xl bg-slate-50/60 border border-slate-100 px-4 py-3 text-left hover:bg-slate-50"
+            >
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <Wallet className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Digital Wallet</p>
+                  <p className="text-xs text-slate-500">Credits, cards, and payments</p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-slate-400" />
+            </button>
+            <button
+              onClick={() => openAdvancedSection('security-settings')}
+              className="w-full flex items-center justify-between rounded-2xl bg-slate-50/60 border border-slate-100 px-4 py-3 text-left hover:bg-slate-50"
+            >
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                  <Shield className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Security</p>
+                  <p className="text-xs text-slate-500">2FA, passwords, and biometrics</p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-slate-400" />
+            </button>
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-blue-100 bg-blue-50/40 px-4 py-5 shadow-sm">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-[11px] font-semibold tracking-[0.2em] text-blue-500">EXCLUSIVE OFFER</p>
+              <h3 className="mt-2 text-lg font-semibold text-slate-900">Refer a Professional</h3>
+              <p className="mt-2 text-sm text-slate-600">
+                Get $50 in service credits for every successful elite referral.
+              </p>
+            </div>
+            <div className="h-14 w-14 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow">
+              <Gift className="w-6 h-6" />
+            </div>
+          </div>
+          <button
+            onClick={handleGenerateReferral}
+            className="mt-5 w-full rounded-2xl bg-slate-900 py-3 text-sm font-semibold text-white shadow hover:bg-slate-800"
+          >
+            Generate Referral Link
+          </button>
+        </section>
+
+        <button
+          onClick={() => setShowAdvanced((prev) => !prev)}
+          className="w-full text-sm font-semibold text-indigo-600 hover:text-indigo-700"
+        >
+          {showAdvanced ? 'Hide full settings' : 'View full settings'}
+        </button>
+      </div>
+
+      {showAdvanced && (
+        <div className="max-w-5xl mx-auto px-4 mt-8 space-y-6">
         
         {/* Top Section Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           
           {/* Personal Details */}
-          <div className="bg-slate-800 rounded-3xl p-6 border border-slate-700">
+          <div id="personal-details" className="bg-slate-800 rounded-3xl p-6 border border-slate-700">
             <h2 className="text-lg font-bold text-white mb-4">Personal Details</h2>
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -988,7 +1223,7 @@ const CustomerProfile: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           
           {/* Preferences */}
-          <div className="bg-slate-800 rounded-3xl p-6 border border-slate-700 h-full">
+          <div id="security-settings" className="bg-slate-800 rounded-3xl p-6 border border-slate-700 h-full">
             <h2 className="text-lg font-bold text-white mb-4">Preferences</h2>
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1166,27 +1401,38 @@ const CustomerProfile: React.FC = () => {
                     </button>
                 </div>
             </div>
-            <div className="bg-slate-800 rounded-3xl p-6 border border-slate-700 flex flex-col justify-center items-start">
-               <h2 className="text-lg font-bold text-white mb-2">Log out of ServoLey</h2>
-               <p className="text-gray-400 text-sm mb-4">You can log back in anytime</p>
-               <button 
-                 onClick={() => {
-                   localStorage.clear();
-                   navigate('/auth');
-                 }}
-                 className="w-full md:w-auto self-end bg-gradient-to-r from-purple-500 to-pink-500 text-white px-6 py-2 rounded-full text-sm font-bold"
-               >
-                 Sign Out
-               </button>
-            </div>
+             <div className="bg-slate-800 rounded-3xl p-6 border border-slate-700 flex flex-col justify-center items-start">
+                <h2 className="text-lg font-bold text-white mb-2">Log out of ServoLey</h2>
+                <p className="text-gray-400 text-sm mb-4">You can log back in anytime</p>
+                <div className="w-full flex flex-col md:flex-row gap-3 md:justify-end">
+                  <button 
+                    onClick={() => {
+                      localStorage.clear();
+                      navigate('/auth');
+                    }}
+                    className="w-full md:w-auto bg-gradient-to-r from-purple-500 to-pink-500 text-white px-6 py-2 rounded-full text-sm font-bold"
+                  >
+                    Sign Out
+                  </button>
+                  <button
+                    onClick={handleDeleteAccount}
+                    disabled={deletingAccount}
+                    className="w-full md:w-auto bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white px-6 py-2 rounded-full text-sm font-bold"
+                  >
+                    {deletingAccount ? 'Deleting...' : 'Delete Account'}
+                  </button>
+                </div>
+             </div>
         </div>
 
       </div>
+      )}
       
       {/* Navigation */}
       <Navigation 
         active={active}
         onNavigate={handleNavigate}
+        variant="light"
       />
       
       {/* Modals */}

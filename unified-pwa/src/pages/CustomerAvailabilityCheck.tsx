@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Briefcase, Clock, MapPin, Star, Store, User } from 'lucide-react';
 import { getServices } from '../services/api_new';
+import { resolveMediaUrl } from '../utils/media';
 
 const FIXED_CITY = 'Tirunelveli';
 const DEFAULT_CATEGORY_OPTIONS = [
@@ -405,12 +406,12 @@ const CustomerAvailabilityCheck: React.FC = () => {
                   className="rounded-2xl border border-slate-800 bg-slate-900 p-5"
                 >
                   <div className="flex items-center gap-3 mb-4">
-                    {record.providerAvatar ? (
-                      <img
-                        src={record.providerAvatar}
-                        alt={record.providerName}
-                        className="w-14 h-14 rounded-full object-cover border border-slate-700"
-                      />
+                      {record.providerAvatar ? (
+                        <img
+                          src={resolveMediaUrl(record.providerAvatar, '')}
+                          alt={record.providerName}
+                          className="w-14 h-14 rounded-full object-cover border border-slate-700"
+                        />
                     ) : (
                       <div className="w-14 h-14 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center">
                         <User className="w-5 h-5 text-slate-300" />

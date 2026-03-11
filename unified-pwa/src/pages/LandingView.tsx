@@ -5,6 +5,7 @@ import CustomerHeader from '../components/CustomerHeader';
 import Navigation from '../components/Navigation';
 import { useUserImage } from '../hooks/useUserImage';
 import { getServices } from '../services/api_new';
+import { resolveMediaUrl } from '../utils/media';
 
 interface LandingViewProps {
   onStartService: (categoryId: string) => void;
@@ -44,15 +45,15 @@ export const LandingView: React.FC<LandingViewProps> = ({ onStartService }) => {
           const totalJobs = Number(provider?.totalOrders || 0);
 
           if (!current || rating > current.rating || (rating === current.rating && totalJobs > current.totalJobs)) {
-            providerMap.set(provider.id, {
-              id: provider.id,
-              name: providerName,
-              rating,
-              totalJobs,
-              image: provider?.users?.profiles?.avatar || null
-            });
-          }
-        });
+              providerMap.set(provider.id, {
+                id: provider.id,
+                name: providerName,
+                rating,
+                totalJobs,
+                image: resolveMediaUrl(provider?.users?.profiles?.avatar, '')
+              });
+            }
+          });
 
         const ranked = Array.from(providerMap.values())
           .sort((a, b) => (b.rating - a.rating) || (b.totalJobs - a.totalJobs))

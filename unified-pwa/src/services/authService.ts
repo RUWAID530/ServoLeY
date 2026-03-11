@@ -1,4 +1,6 @@
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8084';
+import { clearAuthSession, setAuthSession } from '../utils/authSession';
+
+const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8084').replace(/\/$/, '');
 
 type AuthResult = {
   success: boolean;
@@ -42,10 +44,11 @@ const parseApiResponse = async (response: Response): Promise<AuthResult> => {
 
 const storeSession = (data: any) => {
   if (!data?.accessToken || !data?.user?.id || !data?.user?.userType) return;
-  localStorage.setItem('token', data.accessToken);
-  if (data.refreshToken) localStorage.setItem('refreshToken', data.refreshToken);
-  localStorage.setItem('userId', data.user.id);
-  localStorage.setItem('userType', data.user.userType);
+  setAuthSession({
+    accessToken: data.accessToken,
+    refreshToken: data.refreshToken,
+    user: data.user
+  });
 };
 
 export const hashPassword = async (password: string): Promise<string> => password;
@@ -103,8 +106,7 @@ export const authService = {
   },
 
   logout: (): void => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('refreshToken');
+    clearAuthSession();
     localStorage.removeItem('userId');
     localStorage.removeItem('userType');
   }

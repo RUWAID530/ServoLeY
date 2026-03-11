@@ -5,6 +5,7 @@ import { ServiceTable } from '../components/ServiceTable';
 import { Summary } from '../components/Summary';
 import { API_BASE } from '../App';
 import { useNavigate } from 'react-router-dom';
+import { fetchWithAuth, getStoredToken } from '../utils/authSession';
 
 interface Service {
   id: string;
@@ -77,14 +78,7 @@ export function ServicesView() {
   const itemsPerPage = 5;
 
   const getAuthToken = () => {
-    const userId = localStorage.getItem('userId');
-    const sessionId = localStorage.getItem('currentSessionId') || localStorage.getItem('sessionId') || 'default';
-    return (
-      (userId ? localStorage.getItem(`token_${userId}_${sessionId}`) : null) ||
-      (userId ? localStorage.getItem(`accessToken_${userId}_${sessionId}`) : null) ||
-      localStorage.getItem('accessToken') ||
-      localStorage.getItem('token')
-    );
+    return getStoredToken();
   };
 
   const normalizeStatus = (service: ProviderServiceApi) => {
@@ -115,11 +109,7 @@ export function ServicesView() {
         throw new Error('Please log in again to view services.');
       }
 
-      const response = await fetch(`${API_BASE}/api/provider/services`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await fetchWithAuth(`${API_BASE}/api/provider/services`);
 
       if (!response.ok) {
         throw new Error(`Failed to load provider services: ${response.status}`);
@@ -172,7 +162,7 @@ export function ServicesView() {
       transports: ['websocket'],
     });
 
-    const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
+    const token = getStoredToken();
     socket.emit('services:subscribe');
 
     if (token) {
@@ -239,15 +229,9 @@ export function ServicesView() {
       return;
     }
 
-    const token = getAuthToken();
-    if (!token) {
-      alert('Please log in again to edit services.');
-      return;
-    }
-    fetch(`${API_BASE}/api/provider/services/${id}`, {
+    fetchWithAuth(`${API_BASE}/api/provider/services/${id}`, {
       method: 'PUT',
       headers: {
-        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -277,10 +261,9 @@ export function ServicesView() {
       if (!token) {
         throw new Error('Please log in again to manage services.');
       }
-      const response = await fetch(`${API_BASE}/api/provider/services/${id}`, {
+      const response = await fetchWithAuth(`${API_BASE}/api/provider/services/${id}`, {
         method: 'PUT',
         headers: {
-          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ isActive: false }),

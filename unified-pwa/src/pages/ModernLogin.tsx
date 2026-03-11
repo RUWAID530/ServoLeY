@@ -123,24 +123,7 @@ export default function ModernLogin() {
       }
     } catch (error: any) {
       console.error('Login error:', error);
-      
-      if (error.message && (error.message.includes('Cannot connect to server') || 
-          error.message.includes('Connection refused') || 
-          error.message.includes('Failed to fetch'))) {
-        localStorage.setItem('token', 'offline-token-' + Date.now());
-        localStorage.setItem('userType', formData.userType);
-        localStorage.setItem('userId', 'offline-user-id');
-        
-        setErrors({ general: '' });
-        
-        setTimeout(() => {
-          const fallbackRedirect = formData.userType === 'CUSTOMER' ? '/Landing/View' : '/provider/dashboard';
-          navigate(sanitizeRedirectPath(fallbackRedirect, '/landing'));
-        }, 1000);
-        return;
-      } else {
-        setErrors({ general: 'Network error. Please try again.' });
-      }
+      setErrors({ general: 'Network error. Please try again.' });
     } finally {
       setIsLoading(false);
       setLoadingMessage('');

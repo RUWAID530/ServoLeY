@@ -5,6 +5,7 @@ const http = require('http');
 const helmet = require('helmet');
 const cors = require('cors');
 const { Server } = require('socket.io');
+const path = require('path');
 
 const { connectDatabase, prisma } = require('./config/database');
 const { logger } = require('./utils/logger');
@@ -115,7 +116,8 @@ app.use(express.json({ limit: '1mb', verify: captureRawBody }));
 app.use(express.urlencoded({ extended: true, limit: '1mb', verify: captureRawBody }));
 app.use(sanitizeRequestInput);
 
-// Uploads are now served via authenticated download endpoint only
+// Public image/media access for service and profile rendering in customer/provider apps.
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', service: 'servoley-api' });
@@ -166,6 +168,76 @@ const io = new Server(server, {
 
 app.set('io', io);
 
+const setupSocketRedisAdapter = async () => {
+  const redisUrl = String(process.env.REDIS_URL || '').trim();
+  if (!redisUrl) return;
+  try {
+    const { createAdapter } = require('@socket.io/redis-adapter');
+    const { createClient } = require('redis');
+    const pubClient = createClient({ url: redisUrl });
+    const subClient = pubClient.duplicate();
+    await pubClient.connect();
+    await subClient.connect();
+    io.adapter(createAdapter(pubClient, subClient));
+    logger.info('Socket.IO Redis adapter enabled');
+  } catch (error) {
+    logger.warn('Socket.IO Redis adapter not enabled', error?.message || error);
+  }
+};
+
+const startOrderExpirySweeper = () => {
+  const rawInterval = Number(process.env.ORDER_EXPIRY_SWEEP_INTERVAL_MS || 10000);
+  const intervalMs = Number.isNaN(rawInterval) ? 10000 : Math.min(Math.max(rawInterval, 5000), 60000);
+  let sweeping = false;
+
+  setInterval(async () => {
+    if (sweeping) return;
+    sweeping = true;
+    try {
+      const now = new Date();
+      const candidates = await prisma.orders.findMany({
+        where: {
+          status: 'PENDING',
+          expiresAt: { lte: now }
+        },
+        select: { id: true, providerId: true }
+      });
+
+      if (candidates.length === 0) return;
+
+      let expiredCount = 0;
+      for (const { id, providerId } of candidates) {
+        const result = await prisma.orders.updateMany({
+          where: {
+            id,
+            status: 'PENDING',
+            expiresAt: { lte: now }
+          },
+          data: {
+            status: 'EXPIRED',
+            updatedAt: now
+          }
+        });
+
+        if (result.count === 1) {
+          expiredCount += 1;
+          if (id && providerId) {
+            io.to(`provider_${providerId}`).emit('order_expired', { orderId: id });
+          }
+        }
+      }
+
+      if (expiredCount > 0) {
+        logger.info(`Expired ${expiredCount} orders`);
+      }
+    } catch (error) {
+      logger.error('Expiry sweeper failed', error);
+    } finally {
+      sweeping = false;
+    }
+  }, intervalMs);
+};
+
 io.use(async (socket, next) => {
   try {
     const authToken = String(socket.handshake?.auth?.token || '').trim();
@@ -195,6 +267,15 @@ io.use(async (socket, next) => {
 });
 
 io.on('connection', (socket) => {
+  if (socket.data.userType === 'PROVIDER') {
+    socket.join(`provider_${socket.data.userId}`);
+  }
+
+  socket.on('join_provider_room', () => {
+    if (socket.data.userType !== 'PROVIDER') return;
+    socket.join(`provider_${socket.data.userId}`);
+  });
+
   socket.on('services:subscribe', () => {
     socket.join('services:public');
   });
@@ -244,7 +325,9 @@ app.use(errorHandler);
 
 const PORT = Number(process.env.PORT || 8084);
 connectDatabase()
-  .then(() => {
+  .then(async () => {
+    await setupSocketRedisAdapter();
+    startOrderExpirySweeper();
     server.listen(PORT, () => {
       logger.info(`API server listening on port ${PORT}`, {
         nodeEnv: process.env.NODE_ENV || 'development'

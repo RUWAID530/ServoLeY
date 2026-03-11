@@ -5,7 +5,9 @@ import { useNavigate } from 'react-router-dom'
 // import { apiServiceWithFallback } from './services/api'
 // import { Link } from 'react-router-dom'
 import Landing from './pages/Landing'
+import LandingModern from './pages/LandingModern'
 import RoleSelector from './pages/RoleSelector'
+import RoleSelectorModern from './pages/RoleSelectorModern'
 import ModernLogin from './pages/ModernLogin'
 import ModernCustomerSignup from './pages/ModernCustomerSignup'
 import ForgotPassword from './pages/ForgotPassword'
@@ -26,9 +28,10 @@ import CustomerSettingsDashboard from './pages/CustomerSettingsDashboard'
 import { CustomerSupportDashboard } from './pages/CustomerSupportDashboard'
 import { CustomerWallet } from './pages/CustomerWallet'
 import CustomerServicesDashboard from './pages/CustomerServicesDashboard'
+import CustomerDashboardModern from './pages/CustomerDashboardModern'
 
 // Provider Pages
-import { ProviderDashboard } from './pages/ProviderDashboard'
+import ProviderDashboardModern from './pages/ProviderDashboardModern'
 import ProviderProfile from './pages/ProviderProfile'
 import ProviderSettings from './pages/ProviderSettings'
 import ProviderChat from './pages/ProviderChat'
@@ -75,17 +78,17 @@ function App() {
   };
 
   useEffect(() => {
-    document.body.style.backgroundColor = "#0f172a";
+    document.body.style.backgroundColor = "#f9fafb"; // Light background for modern UI
   }, []);
   return (
     <ThemeProvider>
       <ProviderProfileProvider>
-          <div className="min-h-screen bg-slate-900">
+          <div className="min-h-screen bg-gray-50">
           <Routes>
       
         {/* Default route redirects to landing page */}
         <Route path="/" element={<Navigate to="/landing" replace />} />
-        <Route path="/landing" element={<Landing onNavigate={(page: Page) => {
+        <Route path="/landing" element={<LandingModern onNavigate={(page: Page) => {
             if (page === 'login') navigate('/auth');
             else if (page === 'signup') navigate('/role');
             else if (page === 'role') navigate('/role');
@@ -101,7 +104,7 @@ function App() {
 
 
           <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/role" element={<RoleSelector onNavigate={(page: string) => navigate('/' + page)} />} />
+          <Route path="/role" element={<RoleSelectorModern onNavigate={(page: string) => navigate('/' + page)} />} />
           <Route path="/customersignup" element={<ModernCustomerSignup />} />
           <Route path="/signup-fixed" element={<ModernCustomerSignup />} />
           <Route path="/customer/signup-modern" element={<ModernCustomerSignup />} />
@@ -119,8 +122,8 @@ function App() {
 
           <Route path="/customer/home" element={
   <RoleBasedRoute allowedRoles={["CUSTOMER", "customer"]}>
-    <LandingView 
-      onStartService={(categoryId: string) => navigate(`/customer/check-availability?category=${encodeURIComponent(categoryId)}`)}
+    <CustomerDashboardModern 
+      onNavigate={(page: string) => navigate(`/customer/${page}`)}
     />
   </RoleBasedRoute>
 } />
@@ -262,13 +265,9 @@ function App() {
 
           <Route path="/provider/dashboard" element={
   <RoleBasedRoute allowedRoles={["PROVIDER", "provider"]}>
-    <ProviderLayout showSidebar={true} showHeader={true} currentView="overview" setView={navigateProviderView}>
-      <ProviderDashboard onNavigate={(path: string) => {
-        // Navigate directly to provider routes since we're using layouts
-        const fullPath = path.startsWith('/') ? path : `/provider/${path}`;
-        navigate(sanitizeRedirectPath(fullPath, '/provider/dashboard'));
-      }} />
-    </ProviderLayout>
+    <ProviderDashboardModern 
+      onNavigate={(page: string) => navigate(`/provider/${page}`)}
+    />
   </RoleBasedRoute>
 } />
 

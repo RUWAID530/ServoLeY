@@ -1,5 +1,14 @@
-import React, { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import React, { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import {
+  ArrowLeft,
+  Settings,
+  Wallet,
+  Star,
+  CheckCircle,
+  Megaphone,
+  MessageSquare
+} from 'lucide-react'
 import { API_BASE } from '../config/api'
 
 interface Notification {
@@ -10,28 +19,120 @@ interface Notification {
   timestamp: string
   isRead: boolean
   link?: string
-  data?: any // Additional data related to the notification
+  data?: any
 }
 
-interface NotificationGroup {
-  type: string
-  icon: JSX.Element
-  color: string
-  notifications: Notification[]
+type TabKey = 'orders' | 'messages' | 'updates'
+
+type DayBucket = 'today' | 'yesterday' | 'earlier'
+
+const getDayBucket = (value: string): DayBucket => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'earlier'
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfYesterday = new Date(startOfToday.getTime() - 24 * 60 * 60 * 1000)
+
+  if (date >= startOfToday) return 'today'
+  if (date >= startOfYesterday) return 'yesterday'
+  return 'earlier'
+}
+
+const formatTime = (value: string) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+}
+
+const formatRelative = (value: string) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const diffMs = Date.now() - date.getTime()
+  const diffMinutes = Math.floor(diffMs / 60000)
+  if (diffMinutes < 1) return 'Just now'
+  if (diffMinutes < 60) return `${diffMinutes}m ago`
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+const getNotificationIcon = (type: Notification['type']) => {
+  switch (type) {
+    case 'payment':
+      return { icon: <Wallet className="h-5 w-5" />, bg: 'bg-orange-100', text: 'text-orange-600' }
+    case 'review':
+      return { icon: <Star className="h-5 w-5" />, bg: 'bg-orange-100', text: 'text-orange-600' }
+    case 'order':
+      return { icon: <CheckCircle className="h-5 w-5" />, bg: 'bg-slate-100', text: 'text-slate-600' }
+    case 'message':
+      return { icon: <MessageSquare className="h-5 w-5" />, bg: 'bg-emerald-100', text: 'text-emerald-600' }
+    default:
+      return { icon: <Megaphone className="h-5 w-5" />, bg: 'bg-slate-100', text: 'text-slate-600' }
+  }
+}
+
+const getTabKey = (notification: Notification): TabKey => {
+  if (notification.type === 'message') return 'messages'
+  if (notification.type === 'system') return 'updates'
+  return 'orders'
+}
+
+const getFallbackNotifications = () => {
+  const now = new Date()
+  const twoMinutesAgo = new Date(now.getTime() - 2 * 60 * 1000)
+  const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const yesterdayLate = new Date(yesterday)
+  yesterdayLate.setHours(16, 30, 0, 0)
+  const yesterdayMorning = new Date(yesterday)
+  yesterdayMorning.setHours(10, 15, 0, 0)
+
+  return [
+    {
+      id: 'pay-001',
+      title: 'Payment Received',
+      message: '$450.00 from client John Doe has been credited to your wallet.',
+      type: 'payment',
+      timestamp: twoMinutesAgo.toISOString(),
+      isRead: false,
+      link: '/provider/wallet',
+      data: { actionLabel: 'View Wallet' }
+    },
+    {
+      id: 'rev-001',
+      title: 'New Review',
+      message: 'Sarah Jenkins left you a 5-star review: "Excellent work on the plumbing repairs!"',
+      type: 'review',
+      timestamp: oneHourAgo.toISOString(),
+      isRead: false,
+      data: { thumbnail: true }
+    },
+    {
+      id: 'ord-001',
+      title: 'Order Completed',
+      message: 'The project "Kitchen Remodel Phase 1" has been marked as complete.',
+      type: 'order',
+      timestamp: yesterdayLate.toISOString(),
+      isRead: true
+    },
+    {
+      id: 'sys-001',
+      title: 'Policy Update',
+      message: "We've updated our service provider terms of service. Please review the changes.",
+      type: 'system',
+      timestamp: yesterdayMorning.toISOString(),
+      isRead: true,
+      link: '/provider/settings',
+      data: { actionLabel: 'Read More' }
+    }
+  ]
 }
 
 export default function Notifications() {
+  const navigate = useNavigate()
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'all' | 'unread'>('all')
-  const [notificationSettings, setNotificationSettings] = useState({
-    emailNotifications: true,
-    pushNotifications: true,
-    orderUpdates: true,
-    newMessages: true,
-    newReviews: true,
-    paymentAlerts: true
-  })
+  const [activeTab, setActiveTab] = useState<TabKey>('orders')
 
   useEffect(() => {
     fetchNotifications()
@@ -42,12 +143,12 @@ export default function Notifications() {
       const token = localStorage.getItem('token')
       const response = await fetch(`${API_BASE}/provider/notifications`, {
         headers: {
-          'Authorization': `Bearer ${token}`
+          Authorization: `Bearer ${token}`
         }
       })
       const data = await response.json()
       if (data.success) {
-        setNotifications(data.data)
+        setNotifications(Array.isArray(data.data) ? data.data : [])
       }
     } catch (error) {
       console.error('Error fetching notifications:', error)
@@ -56,437 +157,216 @@ export default function Notifications() {
     }
   }
 
-  const markAsRead = async (id: string) => {
-    try {
-      const token = localStorage.getItem('token')
-      const response = await fetch(`${API_BASE}/provider/notifications/${id}/read`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-      
-      if (response.ok) {
-        setNotifications(notifications.map(notification => 
-          notification.id === id ? { ...notification, isRead: true } : notification
-        ))
-      }
-    } catch (error) {
-      console.error('Error marking notification as read:', error)
+  const displayNotifications = useMemo(() => {
+    if (loading) return []
+    if (notifications.length > 0) return notifications
+    return getFallbackNotifications()
+  }, [loading, notifications])
+
+  const filteredNotifications = useMemo(() => {
+    if (activeTab === 'messages') {
+      return displayNotifications.filter((notification) => getTabKey(notification) === 'messages')
     }
-  }
-
-  const markAllAsRead = async () => {
-    try {
-      const token = localStorage.getItem('token')
-      const response = await fetch(`${API_BASE}/provider/notifications/read-all`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-      
-      if (response.ok) {
-        setNotifications(notifications.map(notification => ({ ...notification, isRead: true })))
-      }
-    } catch (error) {
-      console.error('Error marking all notifications as read:', error)
+    if (activeTab === 'updates') {
+      return displayNotifications.filter((notification) => getTabKey(notification) === 'updates')
     }
-  }
+    return displayNotifications.filter((notification) => getTabKey(notification) === 'orders')
+  }, [activeTab, displayNotifications])
 
-  const deleteNotification = async (id: string) => {
-    try {
-      const token = localStorage.getItem('token')
-      const response = await fetch(`${API_BASE}/provider/notifications/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-      
-      if (response.ok) {
-        setNotifications(notifications.filter(notification => notification.id !== id))
-      }
-    } catch (error) {
-      console.error('Error deleting notification:', error)
-    }
-  }
-
-  const updateNotificationSettings = async () => {
-    try {
-      const token = localStorage.getItem('token')
-      const response = await fetch(`${API_BASE}/provider/notifications/settings`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(notificationSettings)
-      })
-      
-      if (response.ok) {
-        // Show success message
-        alert('Notification settings updated successfully!')
-      }
-    } catch (error) {
-      console.error('Error updating notification settings:', error)
-    }
-  }
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString)
-    const now = new Date()
-    const diffInDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
-    
-    if (diffInDays === 0) {
-      return 'Today'
-    } else if (diffInDays === 1) {
-      return 'Yesterday'
-    } else if (diffInDays < 7) {
-      return `${diffInDays} days ago`
-    } else {
-      return date.toLocaleDateString()
-    }
-  }
-
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString)
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  }
-
-  const getNotificationGroups = (): NotificationGroup[] => {
-    const groups: NotificationGroup[] = [
-      {
-        type: 'order',
-        icon: (
-          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
-          </svg>
-        ),
-        color: 'blue',
-        notifications: []
+  const grouped = useMemo(() => {
+    return filteredNotifications.reduce(
+      (acc, notification) => {
+        const bucket = getDayBucket(notification.timestamp)
+        acc[bucket].push(notification)
+        return acc
       },
-      {
-        type: 'payment',
-        icon: (
-          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        ),
-        color: 'green',
-        notifications: []
-      },
-      {
-        type: 'review',
-        icon: (
-          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.539-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-          </svg>
-        ),
-        color: 'yellow',
-        notifications: []
-      },
-      {
-        type: 'message',
-        icon: (
-          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-          </svg>
-        ),
-        color: 'purple',
-        notifications: []
-      },
-      {
-        type: 'system',
-        icon: (
-          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-        ),
-        color: 'gray',
-        notifications: []
-      }
-    ]
-    
-    // Group notifications by type
-    notifications.forEach(notification => {
-      const group = groups.find(g => g.type === notification.type)
-      if (group) {
-        group.notifications.push(notification)
-      }
-    })
-    
-    // Filter out empty groups
-    return groups.filter(group => group.notifications.length > 0)
+      { today: [] as Notification[], yesterday: [] as Notification[], earlier: [] as Notification[] }
+    )
+  }, [filteredNotifications])
+
+  const handleBack = () => {
+    navigate('/provider/dashboard')
   }
 
-  const filteredNotifications = notifications.filter(notification => 
-    filter === 'all' || !notification.isRead
-  )
+  const handleSettings = () => {
+    navigate('/provider/settings')
+  }
 
-  const unreadCount = notifications.filter(n => !n.isRead).length
+  const handleAction = (link?: string) => {
+    if (link) {
+      navigate(link)
+    }
+  }
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center">
-          <h1 className="text-2xl font-semibold text-white">Notifications</h1>
-          {unreadCount > 0 && (
-            <span className="ml-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">
-              {unreadCount} unread
-            </span>
-          )}
+    <div className="min-h-screen bg-[#f6f1ef]">
+      <div className="bg-gradient-to-b from-[#3b261d] to-[#2a1b15] px-5 pt-6 pb-5 text-white">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={handleBack}
+            className="h-10 w-10 rounded-full bg-white/10 flex items-center justify-center"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <h1 className="text-lg font-semibold">Notifications</h1>
+          <button
+            type="button"
+            onClick={handleSettings}
+            className="h-10 w-10 rounded-full bg-white/10 flex items-center justify-center"
+          >
+            <Settings className="h-5 w-5" />
+          </button>
         </div>
-        <div className="flex gap-3">
-          {unreadCount > 0 && (
+
+        <div className="mt-6 flex items-center gap-8 text-sm font-semibold text-white/80">
+          {([
+            { key: 'orders', label: 'New Orders' },
+            { key: 'messages', label: 'Messages' },
+            { key: 'updates', label: 'Platform Updates' }
+          ] as const).map((tab) => (
             <button
-              onClick={markAllAsRead}
-              className="text-cyan-400 hover:text-cyan-300 text-sm"
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              className={`pb-3 transition-colors ${
+                activeTab === tab.key
+                  ? 'text-orange-400 border-b-2 border-orange-500'
+                  : 'hover:text-white'
+              }`}
             >
-              Mark all as read
+              {tab.label}
             </button>
-          )}
-          <Link to="/provider/dashboard" className="text-cyan-400 hover:text-cyan-300 text-sm">Back to Dashboard</Link>
+          ))}
         </div>
       </div>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <div className="mb-4">
-            <div className="flex space-x-2">
-              <button
-                onClick={() => setFilter('all')}
-                className={`px-3 py-1 text-sm rounded-full ${
-                  filter === 'all' 
-                    ? 'bg-blue-600 text-white' 
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
-              >
-                All Notifications
-              </button>
-              <button
-                onClick={() => setFilter('unread')}
-                className={`px-3 py-1 text-sm rounded-full ${
-                  filter === 'unread'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
-              >
-                Unread Notifications
-              </button>
-            </div>
+
+      <div className="px-5 py-6 pb-24">
+        {loading ? (
+          <div className="flex items-center justify-center h-40">
+            <div className="h-8 w-8 rounded-full border-2 border-orange-500 border-t-transparent animate-spin" />
           </div>
-          {loading ? (
-            <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-lg rounded-2xl border border-white/10 p-6">
-              <p className="text-white">Loading notifications...</p>
-            </div>
-          ) : filteredNotifications.length > 0 ? (
-            <div className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-lg rounded-2xl border border-white/10 overflow-hidden">
-              {getNotificationGroups().map(group => (
-                <div key={group.type} className="border-b border-white/10 last:border-b-0">
-                  <div className={`px-6 py-3 bg-${group.color}-50 flex items-center`}>
-                    <div className={`text-${group.color}-600 mr-2`}>
-                      {group.icon}
-                    </div>
-                    <h3 className="text-sm font-medium text-gray-900 capitalize">{group.type}s</h3>
-                  </div>
-                  
-                  <div className="divide-y divide-gray-200">
-                    {group.notifications
-                      .filter(notification => filter === 'all' || !notification.isRead)
-                      .map(notification => (
-                      <div 
-                        key={notification.id} 
-                        className={`p-4 hover:bg-gray-50 ${!notification.isRead ? 'bg-blue-50' : ''}`}
+        ) : filteredNotifications.length === 0 ? (
+          <div className="rounded-3xl bg-white border border-slate-100 p-8 text-center text-slate-500 shadow-sm">
+            No notifications yet.
+          </div>
+        ) : (
+          <div className="space-y-8">
+            {grouped.today.length > 0 && (
+              <section>
+                <p className="text-xs font-semibold tracking-[0.3em] text-slate-500">TODAY</p>
+                <div className="mt-4 space-y-4">
+                  {grouped.today.map((notification) => {
+                    const meta = getNotificationIcon(notification.type)
+                    return (
+                      <div
+                        key={notification.id}
+                        className="rounded-3xl bg-white border border-slate-100 p-5 shadow-sm"
                       >
-                        <div className="flex justify-between">
-                          <div className="flex items-start">
-                            {!notification.isRead && (
-                              <span className="flex-shrink-0 h-2 w-2 rounded-full bg-blue-600 mt-2 mr-2"></span>
-                            )}
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-start gap-4">
+                            <div className={`h-12 w-12 rounded-2xl flex items-center justify-center ${meta.bg} ${meta.text}`}>
+                              {meta.icon}
+                            </div>
                             <div>
-                              <h4 className="text-sm font-medium text-gray-900">{notification.title}</h4>
-                              <p className="text-sm text-gray-600 mt-1">{notification.message}</p>
-                              <div className="flex items-center mt-2 text-xs text-gray-500">
-                                <span>{formatDate(notification.timestamp)}</span>
-                                <span className="mx-1">•</span>
-                                <span>{formatTime(notification.timestamp)}</span>
-                              </div>
+                              <p className="text-base font-semibold text-slate-900">{notification.title}</p>
+                              <p className="mt-2 text-sm text-slate-600">{notification.message}</p>
+                              {notification.data?.actionLabel && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleAction(notification.link)}
+                                  className="mt-4 inline-flex items-center justify-center rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white"
+                                >
+                                  {notification.data.actionLabel}
+                                </button>
+                              )}
                             </div>
                           </div>
-                          <div className="flex space-x-2">
-                            {notification.link && (
-                              <Link
-                                to={notification.link}
-                                className="text-blue-600 hover:text-blue-800"
-                              >
-                                View
-                              </Link>
+                          <span className="text-xs text-slate-400">{formatRelative(notification.timestamp)}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
+
+            {grouped.yesterday.length > 0 && (
+              <section>
+                <p className="text-xs font-semibold tracking-[0.3em] text-slate-500">YESTERDAY</p>
+                <div className="mt-4 space-y-4">
+                  {grouped.yesterday.map((notification) => {
+                    const meta = getNotificationIcon(notification.type)
+                    return (
+                      <div
+                        key={notification.id}
+                        className="rounded-3xl bg-white border border-slate-100 p-5 shadow-sm"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex items-start gap-4 flex-1">
+                            <div className={`h-12 w-12 rounded-2xl flex items-center justify-center ${meta.bg} ${meta.text}`}>
+                              {meta.icon}
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-base font-semibold text-slate-900">{notification.title}</p>
+                              <p className="mt-2 text-sm text-slate-600">{notification.message}</p>
+                              {notification.data?.actionLabel && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleAction(notification.link)}
+                                  className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-orange-600"
+                                >
+                                  {notification.data.actionLabel}
+                                  <span aria-hidden>?</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-xs text-slate-400">Yesterday, {formatTime(notification.timestamp)}</span>
+                            {notification.data?.thumbnail && (
+                              <div className="mt-4 h-14 w-14 rounded-xl bg-gradient-to-br from-orange-500 via-orange-400 to-slate-700" />
                             )}
-                            {!notification.isRead && (
-                              <button
-                                onClick={() => markAsRead(notification.id)}
-                                className="text-blue-600 hover:text-blue-800"
-                              >
-                                Mark as read
-                              </button>
-                            )}
-                            <button
-                              onClick={() => deleteNotification(notification.id)}
-                              className="text-gray-400 hover:text-gray-600"
-                            >
-                              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                            </button>
                           </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    )
+                  })}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="bg-white rounded-lg shadow p-12 text-center">
-              <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-              </svg>
-              <h3 className="mt-2 text-lg font-medium text-gray-900">No notifications</h3>
-              <p className="mt-1 text-gray-500">
-                {filter === 'all' 
-                  ? "You don't have any notifications at the moment." 
-                  : "You don't have any unread notifications."}
-              </p>
-            </div>
-          )}
-        </div>
-        
-        <div className="lg:col-span-1">
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-medium text-gray-900">Notification Settings</h2>
-            </div>
-            
-            <div className="p-6 space-y-4">
-              <div>
-                <h3 className="text-sm font-medium text-gray-900 mb-2">Notification Methods</h3>
-                <div className="space-y-2">
-                  <div className="flex items-center">
-                    <input
-                      id="email-notifications"
-                      type="checkbox"
-                      checked={notificationSettings.emailNotifications}
-                      onChange={(e) => setNotificationSettings({
-                        ...notificationSettings,
-                        emailNotifications: e.target.checked
-                      })}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="email-notifications" className="ml-2 block text-sm text-gray-700">
-                      Email notifications
-                    </label>
-                  </div>
-                  
-                  <div className="flex items-center">
-                    <input
-                      id="push-notifications"
-                      type="checkbox"
-                      checked={notificationSettings.pushNotifications}
-                      onChange={(e) => setNotificationSettings({
-                        ...notificationSettings,
-                        pushNotifications: e.target.checked
-                      })}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="push-notifications" className="ml-2 block text-sm text-gray-700">
-                      Push notifications
-                    </label>
-                  </div>
+              </section>
+            )}
+
+            {grouped.earlier.length > 0 && (
+              <section>
+                <p className="text-xs font-semibold tracking-[0.3em] text-slate-500">EARLIER</p>
+                <div className="mt-4 space-y-4">
+                  {grouped.earlier.map((notification) => {
+                    const meta = getNotificationIcon(notification.type)
+                    return (
+                      <div
+                        key={notification.id}
+                        className="rounded-3xl bg-white border border-slate-100 p-5 shadow-sm"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-start gap-4">
+                            <div className={`h-12 w-12 rounded-2xl flex items-center justify-center ${meta.bg} ${meta.text}`}>
+                              {meta.icon}
+                            </div>
+                            <div>
+                              <p className="text-base font-semibold text-slate-900">{notification.title}</p>
+                              <p className="mt-2 text-sm text-slate-600">{notification.message}</p>
+                            </div>
+                          </div>
+                          <span className="text-xs text-slate-400">{formatRelative(notification.timestamp)}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
-              </div>
-              
-              <div>
-                <h3 className="text-sm font-medium text-gray-900 mb-2">Notification Types</h3>
-                <div className="space-y-2">
-                  <div className="flex items-center">
-                    <input
-                      id="order-updates"
-                      type="checkbox"
-                      checked={notificationSettings.orderUpdates}
-                      onChange={(e) => setNotificationSettings({
-                        ...notificationSettings,
-                        orderUpdates: e.target.checked
-                      })}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="order-updates" className="ml-2 block text-sm text-gray-700">
-                      Order updates
-                    </label>
-                  </div>
-                  
-                  <div className="flex items-center">
-                    <input
-                      id="new-messages"
-                      type="checkbox"
-                      checked={notificationSettings.newMessages}
-                      onChange={(e) => setNotificationSettings({
-                        ...notificationSettings,
-                        newMessages: e.target.checked
-                      })}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="new-messages" className="ml-2 block text-sm text-gray-700">
-                      New messages
-                    </label>
-                  </div>
-                  
-                  <div className="flex items-center">
-                    <input
-                      id="new-reviews"
-                      type="checkbox"
-                      checked={notificationSettings.newReviews}
-                      onChange={(e) => setNotificationSettings({
-                        ...notificationSettings,
-                        newReviews: e.target.checked
-                      })}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="new-reviews" className="ml-2 block text-sm text-gray-700">
-                      New reviews
-                    </label>
-                  </div>
-                  
-                  <div className="flex items-center">
-                    <input
-                      id="payment-alerts"
-                      type="checkbox"
-                      checked={notificationSettings.paymentAlerts}
-                      onChange={(e) => setNotificationSettings({
-                        ...notificationSettings,
-                        paymentAlerts: e.target.checked
-                      })}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="payment-alerts" className="ml-2 block text-sm text-gray-700">
-                      Payment alerts
-                    </label>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="pt-4">
-                <button
-                  onClick={updateNotificationSettings}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
-                >
-                  Save Settings
-                </button>
-              </div>
-            </div>
+              </section>
+            )}
           </div>
-        </div>
+        )}
       </div>
     </div>
   )

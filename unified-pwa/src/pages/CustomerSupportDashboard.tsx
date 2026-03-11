@@ -1,5 +1,24 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, HelpCircle, Loader2, MessageCircle, Search, Ticket } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowLeft,
+  Bell,
+  Calendar,
+  CheckCircle2,
+  ChevronRight,
+  CreditCard,
+  Loader2,
+  Mail,
+  MessageCircle,
+  MessageSquare,
+  Phone,
+  Search,
+  Shield,
+  ShieldCheck,
+  Ticket,
+  User,
+  Users
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Navigation from '../components/Navigation';
 
@@ -76,14 +95,32 @@ const parseJsonSafely = async (response: Response) => {
 
 const ticketRef = (id: string) => `#SL-${String(id || '').replace(/-/g, '').slice(0, 6).toUpperCase()}`;
 
+const supportEmail = (import.meta.env.VITE_SUPPORT_EMAIL || 'support@servoley.com').trim();
+const supportPhone = (import.meta.env.VITE_SUPPORT_PHONE || '').trim();
+const supportPhoneDigits = supportPhone.replace(/\D/g, '');
+const hasValidPhone = supportPhoneDigits.length >= 10;
+
 const statusClass = (status: TicketStatus) => {
   if (status === 'RESOLVED' || status === 'CLOSED') {
-    return 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
+    return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
   }
   if (status === 'IN_PROGRESS') {
-    return 'bg-amber-500/15 text-amber-300 border border-amber-500/30';
+    return 'bg-amber-50 text-amber-700 border border-amber-200';
   }
-  return 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30';
+  return 'bg-blue-50 text-blue-700 border border-blue-200';
+};
+
+const priorityClass = (priority: SupportTicket['priority']) => {
+  if (priority === 'URGENT') {
+    return 'text-rose-700 bg-rose-50 border border-rose-200';
+  }
+  if (priority === 'HIGH') {
+    return 'text-amber-700 bg-amber-50 border border-amber-200';
+  }
+  if (priority === 'MEDIUM') {
+    return 'text-blue-700 bg-blue-50 border border-blue-200';
+  }
+  return 'text-slate-700 bg-slate-100 border border-slate-200';
 };
 
 const formatWhen = (dateStr: string) => {
@@ -110,6 +147,7 @@ export const CustomerSupportDashboard: React.FC<{ onOpenChat: () => void }> = ({
   const [query, setQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [error, setError] = useState('');
+  const [showAllTickets, setShowAllTickets] = useState(false);
 
   const handleNavigate = (page: 'home' | 'services' | 'wallet' | 'support' | 'profile') => {
     switch (page) {
@@ -188,12 +226,41 @@ export const CustomerSupportDashboard: React.FC<{ onOpenChat: () => void }> = ({
     });
   }, [faqs, query, selectedCategory]);
 
-  const ticketOverview = useMemo(() => {
-    const open = tickets.filter((ticket) => ticket.status === 'OPEN').length;
-    const progress = tickets.filter((ticket) => ticket.status === 'IN_PROGRESS').length;
-    const resolved = tickets.filter((ticket) => ticket.status === 'RESOLVED' || ticket.status === 'CLOSED').length;
-    return { open, progress, resolved, total: tickets.length };
-  }, [tickets]);
+  const categoryCards = useMemo(() => {
+    const fallback = ['Payments', 'Bookings', 'Account', 'Safety'];
+    const derived = Array.from(new Set(faqs.map((faq) => faq.category).filter(Boolean)));
+    const source = categories.length ? categories : derived.length ? derived : fallback;
+    const themes = [
+      { icon: CreditCard, color: 'text-blue-600', bg: 'bg-blue-50' },
+      { icon: Calendar, color: 'text-orange-600', bg: 'bg-orange-50' },
+      { icon: User, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+      { icon: Shield, color: 'text-rose-600', bg: 'bg-rose-50' }
+    ];
+
+    return source.slice(0, 4).map((category, index) => {
+      const label = category || 'General';
+      const name = String(category || '').toLowerCase();
+      if (name.includes('payment') || name.includes('billing')) {
+        return { key: label, label, ...themes[0] };
+      }
+      if (name.includes('booking') || name.includes('schedule')) {
+        return { key: label, label, ...themes[1] };
+      }
+      if (name.includes('account') || name.includes('profile')) {
+        return { key: label, label, ...themes[2] };
+      }
+      if (name.includes('safety') || name.includes('security')) {
+        return { key: label, label, ...themes[3] };
+      }
+      const theme = themes[index % themes.length];
+      return { key: label, label, ...theme };
+    });
+  }, [categories, faqs]);
+
+  const displayedTickets = useMemo(
+    () => (showAllTickets ? tickets : tickets.slice(0, 3)),
+    [tickets, showAllTickets]
+  );
 
   const closeTicket = async (ticketId: string) => {
     try {
@@ -265,221 +332,317 @@ export const CustomerSupportDashboard: React.FC<{ onOpenChat: () => void }> = ({
     }
   };
 
+  const handleSupportCall = () => {
+    if (!hasValidPhone) return;
+    window.location.href = `tel:${supportPhone}`;
+  };
+
+  const handleSupportEmail = () => {
+    if (!supportEmail) return;
+    window.location.href = `mailto:${supportEmail}`;
+  };
+
+  const handleSupportWhatsApp = () => {
+    if (!hasValidPhone) return;
+    window.location.href = `https://wa.me/${supportPhoneDigits}`;
+  };
+
+  const handleCommunityForum = () => {
+    window.location.href = '/customer/support/dashboard#support-search';
+  };
+
+  const handleSafetyCenter = () => {
+    window.location.href = '/customer/profile#security-settings';
+  };
+
+  const contactActions = [
+    { label: 'Live Chat', icon: MessageCircle, onClick: onOpenChat, disabled: false },
+    { label: 'Call Us', icon: Phone, onClick: handleSupportCall, disabled: !hasValidPhone },
+    { label: 'Email', icon: Mail, onClick: handleSupportEmail, disabled: !supportEmail },
+    { label: 'WhatsApp', icon: MessageSquare, onClick: handleSupportWhatsApp, disabled: !hasValidPhone }
+  ];
+
+  const showFaqResults = query.trim().length > 0 || selectedCategory !== 'All';
+
   return (
-    <div className="pb-24 pt-0 max-w-5xl mx-auto">
-      <Navigation active="support" onNavigate={handleNavigate} />
+    <div className="min-h-screen bg-slate-50 pb-28">
+      <Navigation active="support" onNavigate={handleNavigate} variant="light" />
 
-      <div className="bg-gradient-to-r from-cyan-600 to-blue-600 px-5 py-8">
-        <h1 className="text-2xl sm:text-3xl font-bold text-white">Support Center</h1>
-        <p className="text-white/85 text-sm mt-2">Raise tickets, track progress, and find instant answers in FAQ.</p>
-        <p className="text-white/75 text-xs mt-1">Every submitted ticket goes to the Admin Support Queue for action.</p>
-        <div className="flex flex-wrap gap-3 mt-5">
+      <div className="max-w-md mx-auto">
+        <header className="flex items-center justify-between px-4 pt-4">
           <button
-            onClick={() => navigate('/customer/support/ticket')}
-            className="bg-white text-blue-700 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-50"
+            onClick={() => navigate(-1)}
+            className="h-9 w-9 rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-100"
+            aria-label="Go back"
           >
-            Raise New Ticket
+            <ArrowLeft className="w-5 h-5 mx-auto" />
           </button>
+          <h1 className="text-base font-semibold text-slate-900">Support Center</h1>
           <button
-            onClick={onOpenChat}
-            className="bg-blue-500/40 text-white border border-blue-200/30 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-500/55"
+            className="relative h-9 w-9 rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-100"
+            aria-label="Notifications"
           >
-            Open Live Chat
+            <Bell className="w-5 h-5 mx-auto" />
+            <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-rose-500" />
           </button>
-        </div>
-      </div>
+        </header>
 
-      <div className="px-4 mt-6 space-y-6">
-        {error && (
-          <div className="rounded-xl border border-red-600/40 bg-red-600/10 px-4 py-3 text-sm text-red-300 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4" />
-            <span>{error}</span>
-          </div>
-        )}
+        <div className="px-4 pb-6 space-y-6">
+          {error && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4" />
+              <span>{error}</span>
+            </div>
+          )}
 
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-            <p className="text-xs text-slate-400">Total Tickets</p>
-            <p className="text-xl font-bold text-white mt-1">{ticketOverview.total}</p>
-          </div>
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-            <p className="text-xs text-slate-400">Open</p>
-            <p className="text-xl font-bold text-cyan-300 mt-1">{ticketOverview.open}</p>
-          </div>
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-            <p className="text-xs text-slate-400">In Progress</p>
-            <p className="text-xl font-bold text-amber-300 mt-1">{ticketOverview.progress}</p>
-          </div>
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-            <p className="text-xs text-slate-400">Resolved/Closed</p>
-            <p className="text-xl font-bold text-emerald-300 mt-1">{ticketOverview.resolved}</p>
-          </div>
-        </section>
-
-        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <div className="flex items-center gap-2 mb-4">
+          <section id="support-search" className="rounded-2xl bg-white border border-slate-100 shadow-sm px-4 py-3 flex items-center gap-2">
             <Search className="w-4 h-4 text-slate-400" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search FAQ by keywords"
-              className="w-full bg-transparent text-white text-sm focus:outline-none"
+              placeholder="Search FAQs or tickets"
+              className="w-full bg-transparent text-sm text-slate-700 focus:outline-none"
             />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setSelectedCategory('All')}
-              className={`px-3 py-1.5 rounded-full text-xs ${
-                selectedCategory === 'All'
-                  ? 'bg-cyan-500/20 border border-cyan-500/40 text-cyan-200'
-                  : 'bg-slate-800 border border-slate-700 text-slate-300'
-              }`}
-            >
-              All
-            </button>
-            {categories.map((category) => (
-              <button
-                key={category}
-                onClick={() => setSelectedCategory(category)}
-                className={`px-3 py-1.5 rounded-full text-xs ${
-                  selectedCategory === category
-                    ? 'bg-cyan-500/20 border border-cyan-500/40 text-cyan-200'
-                    : 'bg-slate-800 border border-slate-700 text-slate-300'
-                }`}
-              >
-                {category}
-              </button>
-            ))}
-          </div>
-        </section>
+          </section>
 
-        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <h3 className="text-sm font-semibold text-slate-200 mb-3">FAQ</h3>
-          {loading ? (
-            <div className="text-sm text-slate-400 flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading FAQ...
+          <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-600 via-blue-600 to-blue-500 p-5 text-white shadow-lg">
+            <div className="absolute -right-10 -bottom-12 h-40 w-40 rounded-full bg-white/10" />
+            <div className="absolute right-5 top-5 h-12 w-12 rounded-2xl bg-white/15 flex items-center justify-center">
+              <Ticket className="w-6 h-6 text-white" />
             </div>
-          ) : visibleFaqs.length === 0 ? (
-            <div className="text-sm text-slate-400">No FAQ found for your search.</div>
-          ) : (
-            <div className="space-y-3">
-              {visibleFaqs.slice(0, 8).map((faq) => (
-                <div key={faq.id} className="border border-slate-800 rounded-xl p-3 bg-slate-800/40">
-                  <p className="text-sm text-white font-medium">{faq.question}</p>
-                  <p className="text-xs text-slate-300 mt-1">{faq.answer}</p>
-                  <p className="text-[11px] text-slate-500 mt-2">{faq.category}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-200">Your Support Tickets</h3>
+            <p className="text-xs uppercase tracking-[0.18em] text-white/70">Have a specific issue?</p>
+            <h2 className="text-lg font-semibold mt-2">We are here to help you.</h2>
+            <p className="text-sm text-white/80 mt-2">
+              Raise a ticket to get fast assistance from our support team.
+            </p>
             <button
               onClick={() => navigate('/customer/support/ticket')}
-              className="text-xs font-semibold text-cyan-300 hover:text-cyan-200"
+              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-50"
             >
-              + Raise Ticket
+              <Ticket className="w-4 h-4" />
+              Raise a Ticket
             </button>
-          </div>
+          </section>
 
-          {loading ? (
-            <div className="text-sm text-slate-400 flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading tickets...
+          <section>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900">Browse by Category</h3>
+              {selectedCategory !== 'All' && (
+                <button
+                  onClick={() => setSelectedCategory('All')}
+                  className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+                >
+                  Clear
+                </button>
+              )}
             </div>
-          ) : tickets.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">
-              No support tickets yet. Create your first ticket for quick help.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {tickets.map((ticket) => (
-                <div key={ticket.id} className="rounded-xl border border-slate-800 p-3 bg-slate-800/40">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-white text-sm font-medium">{ticketRef(ticket.id)} - {ticket.subject}</p>
-                      <p className="text-xs text-slate-400 mt-1">Updated {formatWhen(ticket.updatedAt)}</p>
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              {categoryCards.map((category) => {
+                const Icon = category.icon;
+                const isSelected = selectedCategory === category.label;
+                return (
+                  <button
+                    key={category.key}
+                    onClick={() => setSelectedCategory(category.label)}
+                    className={`rounded-2xl border p-4 text-left transition ${
+                      isSelected ? 'border-blue-500 bg-blue-50/40' : 'border-slate-100 bg-white'
+                    }`}
+                  >
+                    <div className={`h-10 w-10 rounded-2xl ${category.bg} flex items-center justify-center`}>
+                      <Icon className={`w-5 h-5 ${category.color}`} />
                     </div>
-                    <span className={`text-[11px] px-2 py-1 rounded-full font-semibold ${statusClass(ticket.status)}`}>
-                      {ticket.status}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-300 mt-2 line-clamp-2">{ticket.description}</p>
-                  <div className="mt-3 flex flex-wrap items-center gap-3">
-                    {ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED' && (
-                      <button
-                        onClick={() => closeTicket(ticket.id)}
-                        disabled={updatingTicketId === ticket.id}
-                        className="text-xs font-semibold text-slate-200 hover:text-white disabled:opacity-60 inline-flex items-center gap-1"
-                      >
-                        {updatingTicketId === ticket.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                        Mark as Closed
-                      </button>
-                    )}
-                    <button
-                      onClick={() => toggleTimeline(ticket.id)}
-                      disabled={timelineLoadingId === ticket.id}
-                      className="text-xs font-semibold text-cyan-300 hover:text-cyan-200 disabled:opacity-60 inline-flex items-center gap-1"
-                    >
-                      {timelineLoadingId === ticket.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageCircle className="w-3.5 h-3.5" />}
-                      {timelineByTicket[ticket.id] ? 'Hide Updates' : 'View Updates'}
-                    </button>
-                  </div>
+                    <p className="mt-3 text-sm font-semibold text-slate-900">{category.label}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
-                  {timelineByTicket[ticket.id] && (
-                    <div className="mt-3 rounded-lg border border-slate-700 bg-slate-900/60 p-3 space-y-2">
-                      <p className="text-[11px] uppercase tracking-wide text-slate-400">Ticket Timeline</p>
-                      {timelineByTicket[ticket.id].length === 0 ? (
-                        <p className="text-xs text-slate-400">No updates yet. Ticket is waiting in queue.</p>
-                      ) : (
-                        timelineByTicket[ticket.id].map((event) => (
-                          <div key={event.id} className="border border-slate-800 rounded-md p-2 bg-slate-950/40">
-                            <p className="text-xs font-semibold text-white">{event.title}</p>
-                            <p className="text-xs text-slate-300 mt-1">{event.message}</p>
-                            <p className="text-[11px] text-slate-500 mt-1">
-                              {formatWhen(event.createdAt)}{event.actor?.name ? ` - ${event.actor.name}` : ''}
-                            </p>
-                          </div>
-                        ))
+          {showFaqResults && (
+            <section className="rounded-2xl bg-white border border-slate-100 shadow-sm p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-slate-900">Helpful Answers</h3>
+                <button
+                  onClick={() => {
+                    setQuery('');
+                    setSelectedCategory('All');
+                  }}
+                  className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+                >
+                  Reset
+                </button>
+              </div>
+              {loading ? (
+                <div className="text-sm text-slate-500 flex items-center gap-2 mt-3">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Loading answers...
+                </div>
+              ) : visibleFaqs.length === 0 ? (
+                <div className="text-sm text-slate-500 mt-3">No answers found for this search.</div>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  {visibleFaqs.slice(0, 3).map((faq) => (
+                    <div key={faq.id} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                      <p className="text-sm font-semibold text-slate-900">{faq.question}</p>
+                      <p className="text-xs text-slate-600 mt-1 line-clamp-2">{faq.answer}</p>
+                      <p className="text-[11px] text-slate-400 mt-2">{faq.category}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          <section>
+            <h3 className="text-sm font-semibold text-slate-900">Need more help?</h3>
+            <div className="grid grid-cols-4 gap-3 mt-3 text-center">
+              {contactActions.map((action) => {
+                const Icon = action.icon;
+                const isDisabled = action.disabled;
+                return (
+                  <button
+                    key={action.label}
+                    onClick={action.onClick}
+                    disabled={isDisabled}
+                    className={`flex flex-col items-center gap-2 text-[11px] font-medium ${
+                      isDisabled ? 'text-slate-300' : 'text-slate-600'
+                    }`}
+                  >
+                    <div
+                      className={`h-12 w-12 rounded-full border bg-white flex items-center justify-center ${
+                        isDisabled ? 'border-slate-100' : 'border-slate-200'
+                      }`}
+                    >
+                      <Icon className={`w-5 h-5 ${isDisabled ? 'text-slate-300' : 'text-blue-600'}`} />
+                    </div>
+                    {action.label}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <section id="support-tickets" className="rounded-2xl bg-white border border-slate-100 shadow-sm p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900">Recent Tickets</h3>
+              {tickets.length > 3 && !showAllTickets && (
+                <button
+                  onClick={() => setShowAllTickets(true)}
+                  className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+                >
+                  View All
+                </button>
+              )}
+            </div>
+
+            {loading ? (
+              <div className="text-sm text-slate-500 flex items-center gap-2 mt-3">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Loading tickets...
+              </div>
+            ) : displayedTickets.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500 mt-3">
+                No support tickets yet. Create your first ticket for quick help.
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {displayedTickets.map((ticket) => (
+                  <div key={ticket.id} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-400">{ticketRef(ticket.id)}</p>
+                        <p className="text-sm font-semibold text-slate-900 mt-1">{ticket.subject}</p>
+                      </div>
+                      <span className={`text-[10px] px-2 py-1 rounded-full font-semibold ${statusClass(ticket.status)}`}>
+                        {ticket.status.replace('_', ' ')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-2">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${priorityClass(ticket.priority)}`}>
+                        {ticket.priority} PRIORITY
+                      </span>
+                      <span className="text-[11px] text-slate-500">{formatWhen(ticket.createdAt)}</span>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-2 line-clamp-2">{ticket.description}</p>
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <button
+                        onClick={() => toggleTimeline(ticket.id)}
+                        disabled={timelineLoadingId === ticket.id}
+                        className="text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-60 inline-flex items-center gap-1"
+                      >
+                        {timelineLoadingId === ticket.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <MessageCircle className="w-3.5 h-3.5" />
+                        )}
+                        {timelineByTicket[ticket.id] ? 'Hide Updates' : 'View Updates'}
+                      </button>
+                      {ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED' && (
+                        <button
+                          onClick={() => closeTicket(ticket.id)}
+                          disabled={updatingTicketId === ticket.id}
+                          className="text-xs font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-60 inline-flex items-center gap-1"
+                        >
+                          {updatingTicketId === ticket.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          )}
+                          Mark as Closed
+                        </button>
                       )}
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
 
-        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <h3 className="text-sm font-semibold text-slate-200 mb-3">Contact Support</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <button
-              onClick={onOpenChat}
-              className="rounded-xl bg-slate-800 border border-slate-700 p-4 text-left hover:border-slate-500"
-            >
-              <MessageCircle className="w-4 h-4 text-cyan-300" />
-              <p className="text-sm text-white font-semibold mt-2">Live Chat</p>
-              <p className="text-xs text-slate-400 mt-1">Fastest support channel.</p>
-            </button>
-            <button
-              onClick={() => navigate('/customer/support/ticket')}
-              className="rounded-xl bg-slate-800 border border-slate-700 p-4 text-left hover:border-slate-500"
-            >
-              <Ticket className="w-4 h-4 text-cyan-300" />
-              <p className="text-sm text-white font-semibold mt-2">Ticket Support</p>
-              <p className="text-xs text-slate-400 mt-1">Track every update in one place.</p>
-            </button>
-            <div className="rounded-xl bg-slate-800 border border-slate-700 p-4">
-              <HelpCircle className="w-4 h-4 text-cyan-300" />
-              <p className="text-sm text-white font-semibold mt-2">Self Help</p>
-              <p className="text-xs text-slate-400 mt-1">Use FAQ above for common issues.</p>
+                    {timelineByTicket[ticket.id] && (
+                      <div className="mt-3 rounded-lg border border-slate-100 bg-white p-3 space-y-2">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-400">Ticket Timeline</p>
+                        {timelineByTicket[ticket.id].length === 0 ? (
+                          <p className="text-xs text-slate-500">No updates yet. Ticket is waiting in queue.</p>
+                        ) : (
+                          timelineByTicket[ticket.id].map((event) => (
+                            <div key={event.id} className="border border-slate-100 rounded-md p-2 bg-slate-50/70">
+                              <p className="text-xs font-semibold text-slate-900">{event.title}</p>
+                              <p className="text-xs text-slate-600 mt-1">{event.message}</p>
+                              <p className="text-[11px] text-slate-400 mt-1">
+                                {formatWhen(event.createdAt)}{event.actor?.name ? ` - ${event.actor.name}` : ''}
+                              </p>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-2xl bg-white border border-slate-100 shadow-sm p-4">
+            <h3 className="text-sm font-semibold text-slate-900">More Resources</h3>
+            <div className="mt-3 space-y-2">
+              <button
+                onClick={handleCommunityForum}
+                className="w-full flex items-center justify-between rounded-xl border border-slate-100 bg-white px-4 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+              >
+                <span className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-blue-600" />
+                  Community Forum
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-400" />
+              </button>
+              <button
+                onClick={handleSafetyCenter}
+                className="w-full flex items-center justify-between rounded-xl border border-slate-100 bg-white px-4 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+              >
+                <span className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  Safety Center
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-400" />
+              </button>
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import {
   Transaction,
   PaymentMethod
 } from '../types/Index'
+import { clearAuthSession, getStoredToken, refreshAccessToken, setAuthSession } from '../utils/authSession'
 
 
 
@@ -22,6 +23,8 @@ const api = axios.create({
   withCredentials: false
 });
 
+const resolveAuthToken = (): string | null => getStoredToken();
+
 
 // IMPORTANT:
 // Do NOT mask network/server errors as a successful response.
@@ -33,7 +36,7 @@ const api = axios.create({
 
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('accessToken') || localStorage.getItem('token')
+    const token = resolveAuthToken()
 
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
@@ -87,6 +90,7 @@ api.interceptors.response.use(
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject })
         }).then((token) => {
+          originalRequest.headers = originalRequest.headers || {}
           originalRequest.headers.Authorization = `Bearer ${token}`
           return api(originalRequest)
         }).catch((err) => {
@@ -104,18 +108,13 @@ api.interceptors.response.use(
           throw new Error('No refresh token available')
         }
         
-        const response = await api.post('/api/auth/refresh', {
-        refreshToken
-    })
-
-        
-        const { accessToken, refreshToken: newRefreshToken } = response.data.data
-        
-        // Store new tokens
-        localStorage.setItem('accessToken', accessToken)
-        localStorage.setItem('refreshToken', newRefreshToken)
+        const accessToken = await refreshAccessToken()
+        if (!accessToken) {
+          throw new Error('Failed to refresh token')
+        }
         
         // Update original request with new token
+        originalRequest.headers = originalRequest.headers || {}
         originalRequest.headers.Authorization = `Bearer ${accessToken}`
         
         // Process the queue with the new token
@@ -128,12 +127,10 @@ api.interceptors.response.use(
         processQueue(refreshError, null)
         
         // If refresh fails, clear tokens and redirect to login
-        localStorage.removeItem('accessToken')
-        localStorage.removeItem('refreshToken')
-        localStorage.removeItem('token')
+        clearAuthSession()
         
         // Redirect to login page
-        window.location.href = '/login'
+        window.location.href = '/auth'
         
         return Promise.reject(refreshError)
       } finally {
@@ -201,7 +198,7 @@ export const getCategories = async (): Promise<Category[]> => {
 ========================= */
 
 export const getMyProviderProfile = async () => {
-  const token = localStorage.getItem('token') || localStorage.getItem('accessToken');
+  const token = resolveAuthToken();
   
   if (!token) {
     throw new Error('No authentication token found');
@@ -345,9 +342,11 @@ export const login = async (phone: string, password: string, userType: string) =
       accessToken: res.data.data.accessToken.substring(0, 20) + '...',
       refreshToken: res.data.data.refreshToken.substring(0, 20) + '...'
     });
-    localStorage.setItem('accessToken', res.data.data.accessToken)
-    localStorage.setItem('refreshToken', res.data.data.refreshToken)
-    localStorage.setItem('token', res.data.data.accessToken)
+    setAuthSession({
+      accessToken: res.data.data.accessToken,
+      refreshToken: res.data.data.refreshToken,
+      user: res.data.data.user
+    })
   } else {
     console.log('❌ No access token found in response!');
   }
@@ -387,10 +386,11 @@ export const verifyOTP = async (userId: string, code: string) => {
   const res = await api.post('/api/auth/verify-otp', { userId, code })
 
   if (res.data?.data?.accessToken) {
-    localStorage.setItem('accessToken', res.data.data.accessToken)
-    localStorage.setItem('refreshToken', res.data.data.refreshToken)
-    // Keep backward compatibility
-    localStorage.setItem('token', res.data.data.accessToken)
+    setAuthSession({
+      accessToken: res.data.data.accessToken,
+      refreshToken: res.data.data.refreshToken,
+      user: { id: userId }
+    })
   }
 
   return res.data
@@ -402,9 +402,7 @@ export const signup = async (userData: any) => {
 }
 
 export const logout = async () => {
-  localStorage.removeItem('accessToken')
-  localStorage.removeItem('refreshToken')
-  localStorage.removeItem('token')
+  clearAuthSession()
 }
 
 /* =========================
@@ -464,3 +462,5 @@ export const apiServiceWithFallback = {
     }
   }
 }
+
+export { api };

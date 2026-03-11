@@ -34,6 +34,7 @@ const ProviderSettings: React.FC = () => {
 
   const [theme, setTheme] = useState<'dark' | 'light' | 'system'>('dark');
   const [isLoading, setIsLoading] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
   const [supportAdminId, setSupportAdminId] = useState('');
   const [supportAdminName, setSupportAdminName] = useState('Admin Support');
@@ -119,6 +120,56 @@ const ProviderSettings: React.FC = () => {
       setTimeout(() => setSaveMessage(''), 3000);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    const firstConfirm = window.confirm('This will permanently deactivate your account and remove your personal details. Continue?');
+    if (!firstConfirm) return;
+
+    const confirmText = window.prompt('Type DELETE to confirm account deletion');
+    if (String(confirmText || '').trim() !== 'DELETE') {
+      setSaveMessage('Account deletion cancelled. Confirmation text did not match.');
+      setTimeout(() => setSaveMessage(''), 3000);
+      return;
+    }
+
+    const token = localStorage.getItem('token') || localStorage.getItem('accessToken');
+    if (!token) {
+      setSaveMessage('Session expired. Please login again.');
+      setTimeout(() => setSaveMessage(''), 3000);
+      return;
+    }
+
+    try {
+      setDeletingAccount(true);
+      const response = await fetch(`${API_BASE}/auth/me`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ confirmText: 'DELETE' })
+      });
+
+      const payload = await parseJsonSafely(response);
+      if (!response.ok || !payload?.success) {
+        const validationMessage = Array.isArray(payload?.errors) && payload.errors.length > 0
+          ? String(payload.errors[0]?.msg || '')
+          : '';
+        throw new Error(validationMessage || payload?.message || `Failed to delete account (${response.status})`);
+      }
+
+      localStorage.clear();
+      setSaveMessage('Account deleted successfully. Redirecting...');
+      window.setTimeout(() => {
+        window.location.href = '/auth';
+      }, 600);
+    } catch (error: any) {
+      setSaveMessage(error?.message || 'Failed to delete account. Please try again.');
+      setTimeout(() => setSaveMessage(''), 3500);
+    } finally {
+      setDeletingAccount(false);
     }
   };
 
@@ -617,6 +668,19 @@ const ProviderSettings: React.FC = () => {
                       <p className="text-slate-400 mb-3">Add an extra layer of security to your account</p>
                       <button className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white font-medium rounded-lg transition-colors">
                         Enable 2FA
+                      </button>
+                    </div>
+                    <div className="bg-red-950/40 border border-red-700/40 rounded-lg p-4">
+                      <h3 className="text-red-300 font-semibold mb-2">Danger Zone</h3>
+                      <p className="text-red-100/80 text-sm mb-4">
+                        Deleting your account will disable access immediately and remove your personal details.
+                      </p>
+                      <button
+                        onClick={handleDeleteAccount}
+                        disabled={deletingAccount}
+                        className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-medium rounded-lg transition-colors"
+                      >
+                        {deletingAccount ? 'Deleting...' : 'Delete Account'}
                       </button>
                     </div>
                   </div>

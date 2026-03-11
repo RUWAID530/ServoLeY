@@ -1,13 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import { Bell, Calendar, Clock, Eye, LayoutGrid, MessageSquare } from 'lucide-react';
 import {
   getApiErrorMessage,
   getProviderAuthToken,
   parseJsonSafely,
   providerFetchWithFallback
 } from '../utils/providerApi';
-
-const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8086').replace(/\/$/, '');
 
 type ProviderOrderStatus =
   | 'pending'
@@ -59,17 +58,23 @@ const formatDateTime = (dateValue: string, timeValue?: string) => {
   return `${dateLabel} ${parsedDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
 };
 
-const getStatusColor = (status: ProviderOrderStatus) => {
-  if (status === 'pending') return 'bg-amber-500/20 text-amber-300';
-  if (status === 'accepted' || status === 'in_progress') return 'bg-blue-500/20 text-blue-300';
-  if (status === 'completed') return 'bg-emerald-500/20 text-emerald-300';
-  if (status === 'rejected') return 'bg-rose-500/20 text-rose-300';
-  return 'bg-slate-600/20 text-slate-300';
-};
-
-const statusLabel = (status: ProviderOrderStatus) => {
-  if (status === 'in_progress') return 'In Progress';
-  return status[0].toUpperCase() + status.slice(1);
+const getStatusMeta = (status: ProviderOrderStatus) => {
+  if (status === 'in_progress') {
+    return { label: 'In Progress', className: 'bg-orange-100 text-orange-600' };
+  }
+  if (status === 'pending') {
+    return { label: 'Awaiting Approval', className: 'bg-amber-100 text-amber-600' };
+  }
+  if (status === 'accepted') {
+    return { label: 'Scheduled', className: 'bg-blue-100 text-blue-600' };
+  }
+  if (status === 'completed') {
+    return { label: 'Completed', className: 'bg-emerald-100 text-emerald-600' };
+  }
+  if (status === 'rejected') {
+    return { label: 'Rejected', className: 'bg-rose-100 text-rose-600' };
+  }
+  return { label: 'Cancelled', className: 'bg-slate-200 text-slate-600' };
 };
 
 const normalizeIssueDataFromNotes = (notes: string) => {
@@ -91,19 +96,24 @@ const normalizeIssueDataFromNotes = (notes: string) => {
   };
 };
 
-const resolveMediaUrl = (value: string) => {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  if (/^https?:\/\//i.test(raw)) return raw;
-  return `${API_BASE}${raw.startsWith('/') ? raw : `/${raw}`}`;
-};
-
 export default function ProviderOrders() {
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<ProviderOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [authRequired, setAuthRequired] = useState(false);
-  const [filter, setFilter] = useState<'all' | ProviderOrderStatus>('all');
+  const [filter, setFilter] = useState<'active' | 'pending' | 'completed'>('active');
+  const handleNotifications = () => {
+    navigate('/provider/notification');
+  };
+
+  const handleViewDetails = (orderId: string) => {
+    navigate('/provider/bookings', { state: { orderId } });
+  };
+
+  const handleChat = (orderId: string) => {
+    navigate('/provider/messages', { state: { orderId } });
+  };
 
   const fetchOrders = async () => {
     try {
@@ -118,15 +128,31 @@ export default function ProviderOrders() {
       }
 
       setAuthRequired(false);
-      const response = await providerFetchWithFallback('/api/provider/orders', token);
-      const payload = await parseJsonSafely(response);
+      const candidates = ['/api/provider/orders', '/api/provider/bookings'];
+      let payload: any = null;
+      let response: Response | null = null;
 
-      if (!response.ok || !payload?.success) {
-        throw new Error(getApiErrorMessage(payload, `Failed to load orders (${response.status})`));
+      for (const endpoint of candidates) {
+        response = await providerFetchWithFallback(endpoint, token);
+        const parsed = await parseJsonSafely(response);
+        if (response.ok && parsed?.success) {
+          payload = parsed;
+          break;
+        }
       }
 
-      const mapped: ProviderOrder[] = Array.isArray(payload?.data?.orders)
-        ? payload.data.orders.map((order: any) => ({
+      if (!response || !payload?.success) {
+        throw new Error(getApiErrorMessage(payload, `Failed to load orders (${response?.status || 0})`));
+      }
+
+      const rawOrders = Array.isArray(payload?.data?.orders)
+        ? payload.data.orders
+        : Array.isArray(payload?.data?.bookings)
+          ? payload.data.bookings
+          : [];
+
+      const mapped: ProviderOrder[] = Array.isArray(rawOrders)
+        ? rawOrders.map((order: any) => ({
             id: String(order.id || ''),
             orderNumber: order.orderNumber || `ORD-${String(order.id || '').slice(0, 8).toUpperCase()}`,
             customerName: order?.customer?.full_name || order?.customerName || 'Customer',
@@ -161,45 +187,27 @@ export default function ProviderOrders() {
   }, []);
 
   const filteredOrders = useMemo(() => {
-    if (filter === 'all') return orders;
-    return orders.filter((order) => order.status === filter);
+    if (filter === 'pending') {
+      return orders.filter((order) => order.status === 'pending');
+    }
+    if (filter === 'completed') {
+      return orders.filter((order) => order.status === 'completed');
+    }
+    return orders.filter((order) => order.status === 'accepted' || order.status === 'in_progress');
   }, [filter, orders]);
 
-  const updateOrderStatus = async (orderId: string, apiStatus: string, fallbackStatus: ProviderOrderStatus) => {
-    try {
-      setError('');
-      const token = getProviderAuthToken();
-      if (!token) {
-        setAuthRequired(true);
-        return;
-      }
-
-      const response = await providerFetchWithFallback(`/api/provider/orders/${orderId}/status`, token, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ status: apiStatus })
-      });
-      const payload = await parseJsonSafely(response);
-      if (!response.ok || !payload?.success) {
-        throw new Error(getApiErrorMessage(payload, 'Failed to update booking status'));
-      }
-      const updatedStatus = normalizeOrderStatus(payload?.data?.order?.status || fallbackStatus);
-
-      setOrders((current) =>
-        current.map((order) => (order.id === orderId ? { ...order, status: updatedStatus } : order))
-      );
-    } catch (statusError: any) {
-      setError(statusError?.message || 'Failed to update booking status');
-    }
-  };
+  const upcomingSchedule = useMemo(() => {
+    const upcoming = orders
+      .filter((order) => order.status === 'accepted' || order.status === 'in_progress')
+      .sort((a, b) => new Date(a.bookingDate || a.createdAt).getTime() - new Date(b.bookingDate || b.createdAt).getTime());
+    return upcoming.slice(0, 3);
+  }, [orders]);
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div className="min-h-screen bg-[#fbf6f4] px-5 py-8">
         <div className="flex items-center justify-center h-56">
-          <div className="h-9 w-9 rounded-full border-2 border-cyan-500 border-t-transparent animate-spin" />
+          <div className="h-9 w-9 rounded-full border-2 border-orange-500 border-t-transparent animate-spin" />
         </div>
       </div>
     );
@@ -207,12 +215,12 @@ export default function ProviderOrders() {
 
   if (authRequired) {
     return (
-      <div className="p-6">
-        <div className="max-w-xl bg-rose-500/10 border border-rose-500/30 rounded-xl p-6 text-center">
-          <p className="text-rose-300 mb-4">Please log in to view your bookings.</p>
+      <div className="min-h-screen bg-[#fbf6f4] px-5 py-8">
+        <div className="bg-white border border-rose-200 rounded-2xl p-6 text-center shadow-sm">
+          <p className="text-rose-500 mb-4">Please log in to view your bookings.</p>
           <button
             onClick={() => (window.location.href = '/auth')}
-            className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg"
+            className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg"
           >
             Login
           </button>
@@ -222,147 +230,141 @@ export default function ProviderOrders() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-white">Bookings</h1>
-          <p className="text-sm text-slate-400">Track and manage all incoming customer jobs.</p>
+    <div className="min-h-screen bg-[#fbf6f4] px-5 py-8 pb-24">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="h-12 w-12 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center">
+            <LayoutGrid className="h-5 w-5" />
+          </div>
+          <div>
+            <h1 className="text-xl font-semibold text-slate-900">Manage Jobs</h1>
+            <p className="text-sm text-slate-500">Track active requests and schedules.</p>
+          </div>
         </div>
-        <Link to="/provider/dashboard" className="text-cyan-400 hover:text-cyan-300 text-sm">
-          Back to Dashboard
-        </Link>
+        <button
+          type="button"
+          onClick={handleNotifications}
+          className="relative h-10 w-10 rounded-full bg-white shadow-sm border border-slate-100 flex items-center justify-center"
+        >
+          <Bell className="h-5 w-5 text-slate-500" />
+          <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-orange-500" />
+        </button>
       </div>
 
       {error && (
-        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+        <div className="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
           {error}
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        {(['all', 'pending', 'accepted', 'in_progress', 'completed', 'cancelled', 'rejected'] as const).map((status) => (
+      <div className="mt-6 flex items-center gap-8 text-sm font-semibold text-slate-400">
+        {(['active', 'pending', 'completed'] as const).map((tab) => (
           <button
-            key={status}
-            onClick={() => setFilter(status)}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-              filter === status ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            key={tab}
+            onClick={() => setFilter(tab)}
+            className={`pb-3 transition ${
+              filter === tab ? 'text-orange-600 border-b-2 border-orange-500' : 'hover:text-slate-600'
             }`}
           >
-            {status === 'all' ? 'All' : statusLabel(status)}
+            {tab[0].toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
 
-      {filteredOrders.length === 0 ? (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-10 text-center">
-          <p className="text-white font-medium">No bookings found</p>
-          <p className="text-sm text-slate-400 mt-1">
-            {filter === 'all' ? 'Bookings will appear here once customers book services.' : `No ${filter} bookings.`}
-          </p>
-        </div>
-      ) : (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl divide-y divide-slate-800">
-          {filteredOrders.map((order) => (
-            <div key={order.id} className="p-4 sm:p-5 flex flex-col gap-3">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-white font-semibold">{order.serviceName}</h3>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(order.status)}`}>
-                      {statusLabel(order.status)}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-300 mt-1">{order.customerName}</p>
-                  {order.customerPhone && <p className="text-xs text-slate-400 mt-0.5">{order.customerPhone}</p>}
-                </div>
-                <div className="text-left md:text-right">
-                  <p className="text-sm text-white font-medium">{formatCurrency(order.totalAmount)}</p>
-                  <p className="text-xs text-slate-400">{formatDateTime(order.bookingDate || order.createdAt, order.bookingTime)}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                  <p className="text-xs text-slate-400">Order ID</p>
-                  <p className="text-slate-200 mt-1">{order.orderNumber}</p>
-                </div>
-                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                  <p className="text-xs text-slate-400">Booking Time</p>
-                  <p className="text-slate-200 mt-1">{formatDateTime(order.bookingDate || order.createdAt, order.bookingTime)}</p>
-                </div>
-                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3 md:col-span-2">
-                  <p className="text-xs text-slate-400">Location</p>
-                  <p className="text-slate-200 mt-1">{order.address || 'Location not provided'}</p>
-                </div>
-                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3 md:col-span-2">
-                  <p className="text-xs text-slate-400">Issue</p>
-                  <p className="text-slate-200 mt-1 whitespace-pre-wrap">
-                    {order.issueDescription || 'Customer did not add issue details.'}
-                  </p>
-                </div>
-              </div>
-
-              {order.issuePhotos.length > 0 && (
-                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-                  <p className="text-xs text-slate-400 mb-2">Issue Images</p>
-                  <div className="flex flex-wrap gap-2">
-                    {order.issuePhotos.map((photo, index) => {
-                      const src = resolveMediaUrl(photo);
-                      return (
-                        <a
-                          key={`${order.id}-issue-${index}`}
-                          href={src}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="block w-20 h-20 rounded-md overflow-hidden border border-slate-700 hover:border-cyan-500 transition-colors"
-                          title="Open issue image"
-                        >
-                          <img src={src} alt={`Issue ${index + 1}`} className="w-full h-full object-cover" />
-                        </a>
-                      );
-                    })}
+      <div className="mt-6 space-y-4">
+        {filteredOrders.length === 0 ? (
+          <div className="rounded-3xl bg-white border border-slate-100 p-8 text-center text-slate-500 shadow-sm">
+            No jobs found for this tab.
+          </div>
+        ) : (
+          filteredOrders.map((order) => {
+            const statusMeta = getStatusMeta(order.status);
+            return (
+              <div key={order.id} className="rounded-3xl bg-white border border-slate-100 p-5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusMeta.className}`}>
+                    {statusMeta.label}
+                  </span>
+                  <div className="text-right">
+                    <p className="text-lg font-semibold text-orange-600">{formatCurrency(order.totalAmount)}</p>
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Total Earnings</p>
                   </div>
                 </div>
-              )}
 
-              <div className="flex flex-wrap gap-2">
-                {order.status === 'pending' && (
-                  <>
-                    <button
-                      onClick={() => updateOrderStatus(order.id, 'accepted', 'accepted')}
-                      className="px-3 py-1.5 text-sm rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white"
-                    >
-                      Accept
-                    </button>
-                    <button
-                      onClick={() => updateOrderStatus(order.id, 'rejected', 'rejected')}
-                      className="px-3 py-1.5 text-sm rounded-lg bg-rose-600 hover:bg-rose-700 text-white"
-                    >
-                      Reject
-                    </button>
-                  </>
-                )}
-                {order.status === 'accepted' && (
+                <h3 className="mt-3 text-lg font-semibold text-slate-900">{order.serviceName}</h3>
+
+                <div className="mt-4 flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-xs font-semibold">
+                      {order.customerName.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-400">Client</p>
+                      <p className="font-semibold text-slate-800">{order.customerName}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-slate-400">Scheduled</p>
+                    <p className="font-semibold text-slate-800">
+                      {formatDateTime(order.bookingDate || order.createdAt, order.bookingTime)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex items-center gap-3">
                   <button
-                    onClick={() => updateOrderStatus(order.id, 'in_progress', 'in_progress')}
-                    className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white"
+                    type="button"
+                    onClick={() => handleViewDetails(order.id)}
+                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 text-white py-3 text-sm font-semibold shadow-sm hover:bg-orange-600"
                   >
-                    Start Work
+                    <Eye className="h-4 w-4" />
+                    View Details
                   </button>
-                )}
-                {order.status === 'in_progress' && (
                   <button
-                    onClick={() => updateOrderStatus(order.id, 'completed', 'completed')}
-                    className="px-3 py-1.5 text-sm rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white"
+                    type="button"
+                    onClick={() => handleChat(order.id)}
+                    className="h-12 w-12 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-600"
                   >
-                    Mark Complete
+                    <MessageSquare className="h-5 w-5" />
                   </button>
-                )}
+                </div>
               </div>
+            );
+          })
+        )}
+      </div>
+
+      <div className="mt-10">
+        <p className="text-xs font-semibold tracking-[0.3em] text-slate-400">UPCOMING SCHEDULE</p>
+        <div className="mt-4 space-y-3">
+          {upcomingSchedule.length === 0 ? (
+            <div className="rounded-2xl bg-white border border-slate-100 p-4 text-sm text-slate-500 shadow-sm">
+              No upcoming appointments.
             </div>
-          ))}
+          ) : (
+            upcomingSchedule.map((order) => (
+              <div key={`upcoming-${order.id}`} className="rounded-2xl bg-white border border-slate-100 p-4 shadow-sm flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-11 w-11 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center">
+                    <Calendar className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-800">{order.serviceName}</p>
+                    <p className="text-sm text-slate-500 flex items-center gap-1">
+                      <Clock className="h-3.5 w-3.5" />
+                      {formatDateTime(order.bookingDate || order.createdAt, order.bookingTime)}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="font-semibold text-orange-600">{formatCurrency(order.totalAmount)}</p>
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Details</p>
+                </div>
+              </div>
+            ))
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

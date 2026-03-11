@@ -33,7 +33,7 @@ class FileOwnershipManager {
       return {
         fileId,
         filename: fileData.filename,
-        url: `/api/upload/${fileData.filename}`
+        url: `/uploads/${fileData.filename}`
       };
     } catch (error) {
       console.error('Failed to store file ownership:', error);
@@ -87,7 +87,7 @@ class FileOwnershipManager {
         fileSize: file.fileSize,
         mimeType: file.mimeType,
         uploadedAt: file.uploadedAt,
-        url: `/api/upload/${file.filename}`
+        url: `/uploads/${file.filename}`
       }));
     } catch (error) {
       console.error('Failed to get user files:', error);
