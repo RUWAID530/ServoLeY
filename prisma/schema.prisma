@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = "postgresql://servolay_user:mNt6XrRWQand6vOmCtTdZowegZtq0bhR@dpg-d6g0ulbh46gs738m285g-a.oregon-postgres.render.com:5432/servolay?sslmode=require"
+  url      = "postgresql://servolay_user:mNt6XrRWQand6vOmCtTdZowegZtq0bhR@dpg-d6g0ulbh46gs738m285g-a.oregon-postgres.render.com:5432/servolay"
 }
 
 model admin_actions {
