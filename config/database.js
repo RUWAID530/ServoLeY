@@ -37,6 +37,7 @@ if (!global.__SERVOLEY_PRISMA__) {
 }
 
 const connectDatabase = async () => {
+  console.log('DEBUG: DATABASE_URL =', process.env.DATABASE_URL);
   if (!process.env.DATABASE_URL) {
     throw new Error('DATABASE_URL is not configured');
   }
